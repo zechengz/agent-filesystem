@@ -65,6 +65,7 @@ type Props = {
   onEditWorkspace?: (workspace: AFSWorkspaceSummary) => void;
   onDeleteWorkspace?: (workspace: AFSWorkspaceSummary) => void;
   deletingWorkspaceKey?: string | null;
+  fillAvailableHeight?: boolean;
 };
 
 function workspaceRowKey(workspace: AFSWorkspaceSummary) {
@@ -83,6 +84,7 @@ export function WorkspaceTable({
   onOpenWorkspaceTab,
   onDeleteWorkspace,
   deletingWorkspaceKey,
+  fillAvailableHeight = false,
 }: Props) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<WorkspaceSortField>("updatedAt");
@@ -290,7 +292,7 @@ export function WorkspaceTable({
 
   return (
     <>
-      <S.TableBlock>
+      <WorkspaceTableBlock $fillAvailableHeight={fillAvailableHeight}>
       <S.HeadingWrap style={{ padding: 0 }}>
         <S.SearchInput
           value={search}
@@ -328,8 +330,8 @@ export function WorkspaceTable({
 
       {/* ---- TABLE VIEW ---- */}
       {!loading && !error && filteredRows.length > 0 && viewMode === "table" ? (
-        <S.TableCard>
-          <WorkspaceTableViewport>
+        <WorkspaceTableCard $fillAvailableHeight={fillAvailableHeight}>
+          <WorkspaceTableViewport $fillAvailableHeight={fillAvailableHeight}>
             <Table
               columns={columns}
               data={filteredRows}
@@ -353,7 +355,7 @@ export function WorkspaceTable({
               onRowClick={(rowData) => onOpenWorkspace(rowData)}
             />
           </WorkspaceTableViewport>
-        </S.TableCard>
+        </WorkspaceTableCard>
       ) : null}
 
       {/* ---- CARD VIEW ---- */}
@@ -447,12 +449,40 @@ export function WorkspaceTable({
           })}
         </S.WorkspaceCardGrid>
       ) : null}
-      </S.TableBlock>
+      </WorkspaceTableBlock>
     </>
   );
 }
 
-const WorkspaceTableViewport = styled(S.DenseTableViewport)`
+const WorkspaceTableBlock = styled(S.TableBlock)<{ $fillAvailableHeight: boolean }>`
+  ${({ $fillAvailableHeight }) =>
+    $fillAvailableHeight &&
+    css`
+      flex: 1 1 auto;
+      min-height: 0;
+    `}
+`;
+
+const WorkspaceTableCard = styled(S.TableCard)<{ $fillAvailableHeight: boolean }>`
+  ${({ $fillAvailableHeight }) =>
+    $fillAvailableHeight &&
+    css`
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
+    `}
+`;
+
+const WorkspaceTableViewport = styled(S.DenseTableViewport)<{ $fillAvailableHeight: boolean }>`
+  ${({ $fillAvailableHeight }) =>
+    $fillAvailableHeight &&
+    css`
+      flex: 1 1 auto;
+      min-height: 0;
+      max-height: none;
+    `}
+
   /* Reveal copy button on row hover */
   tbody tr:hover button[aria-label^="Copy workspace ID"] {
     opacity: 0.7;

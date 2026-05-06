@@ -25,10 +25,14 @@ func TestConfigPathDefaultsToAFSConfig(t *testing.T) {
 	}
 }
 
-func TestWorkspaceRootShortcutsAreHiddenAliases(t *testing.T) {
+func TestWorkspaceRootShortcutsAreDocumentedAliases(t *testing.T) {
 	t.Helper()
 
-	for _, command := range []string{"mount", "unmount", "create", "list", "info", "import", "fork", "delete"} {
+	for _, command := range []string{
+		"mount", "unmount", "create", "list", "clone", "default",
+		"set-default", "unset-default", "info", "import", "fork",
+		"versioning", "delete",
+	} {
 		if !isWorkspaceRootShortcut(command) {
 			t.Fatalf("isWorkspaceRootShortcut(%q) = false, want true", command)
 		}
@@ -46,10 +50,17 @@ func TestWorkspaceRootShortcutsAreHiddenAliases(t *testing.T) {
 	}
 
 	out := captureStderrText(t, printUsage)
-	for _, hidden := range []string{"  mount", "  unmount", "  create", "  list", "  import", "  fork", "  delete", "  reset"} {
-		if strings.Contains(out, hidden) {
-			t.Fatalf("top-level help should not document hidden shortcut %q:\n%s", hidden, out)
+	for _, documented := range []string{
+		"Workspace Shortcuts", "mount", "unmount", "create", "list", "clone",
+		"default", "set-default", "unset-default", "info", "import", "fork",
+		"versioning", "delete",
+	} {
+		if !strings.Contains(out, documented) {
+			t.Fatalf("top-level help should document workspace shortcut %q:\n%s", documented, out)
 		}
+	}
+	if strings.Contains(out, "  reset") {
+		t.Fatalf("top-level help should not document non-workspace shortcut %q:\n%s", "reset", out)
 	}
 }
 

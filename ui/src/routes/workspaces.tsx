@@ -141,18 +141,23 @@ function WorkspacesPage() {
   }
 
   return (
-    <PageStack>
+    <WorkspacesPageStack>
       <WorkspaceTable
         rows={workspaces}
         loading={workspacesQuery.isLoading}
         error={workspacesQuery.isError}
+        fillAvailableHeight
         connectedAgentsByWorkspace={connectedAgentsByWorkspace}
         onOpenWorkspace={openWorkspace}
         onPreviewWorkspace={previewWorkspace}
         onOpenWorkspaceTab={openWorkspaceTab}
         // intentionally no onEditWorkspace / onDeleteWorkspace — managed via CLI.
       />
-    </PageStack>
+    </WorkspacesPageStack>
   );
 }
 
+const WorkspacesPageStack = styled(PageStack)`
+  flex: 1 1 auto;
+  min-height: 0;
+`;

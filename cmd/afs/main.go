@@ -107,7 +107,9 @@ func main() {
 
 func isWorkspaceRootShortcut(command string) bool {
 	switch command {
-	case "mount", "unmount", "create", "list", "info", "import", "fork", "delete":
+	case "mount", "unmount", "create", "list", "clone", "default",
+		"set-default", "unset-default", "info", "import", "fork",
+		"versioning", "delete":
 		return true
 	default:
 		return false
@@ -140,7 +142,7 @@ func printUsage() {
 	fmt.Fprintf(w, "%sCommands:%s\n", bold, reset)
 	fmt.Fprintf(w, "  %sstatus%s             %sshow AFS status and local workspace mounts%s\n\n", bold, reset, dim, reset)
 
-	fmt.Fprintf(w, "  %sws%s (workspace)     %smount, unmount, create, list, import, fork, versioning, delete%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sws%s (workspace)     %smount, create, list, clone, defaults, import, fork, versioning%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sfs%s (filesystem)    %sread, search, and safely write workspace files%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %scp%s (checkpoint)    %screate, list, show, diff, restore%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %slog%s                %sWorkspace file-change log%s\n\n", bold, reset, dim, reset)
@@ -151,15 +153,20 @@ func printUsage() {
 	fmt.Fprintf(w, "  %sdatabase%s           %sadvanced database operations%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %smcp%s                %sstart the MCP server%s\n\n", bold, reset, dim, reset)
 
+	fmt.Fprintf(w, "%sWorkspace Shortcuts:%s\n", bold, reset)
+	fmt.Fprintf(w, "  %sOmit \"ws\" for:%s mount, unmount, create, list, clone, default, set-default,\n", dim, reset)
+	fmt.Fprintf(w, "                 unset-default, info, import, fork, versioning, delete\n")
+	fmt.Fprintf(w, "  %sExample:%s %s%s mount demo ~/demo%s  %s(same as %s ws mount demo ~/demo)%s\n\n", dim, reset, orange, bin, reset, dim, bin, reset)
+
 	fmt.Fprintf(w, "%sExamples:%s\n", bold, reset)
 	fmt.Fprintf(w, "  %s%s auth login%s\n    Sign in to AFS Cloud via browser.\n", orange, bin, reset)
-	fmt.Fprintf(w, "  %s%s ws mount getting-started ~/getting-started%s\n    Mount a workspace to a local folder.\n", orange, bin, reset)
-	fmt.Fprintf(w, "  %s%s ws unmount getting-started%s\n    Stop managing that workspace; keep local files.\n\n", orange, bin, reset)
+	fmt.Fprintf(w, "  %s%s mount getting-started ~/getting-started%s\n    Mount a workspace to a local folder.\n", orange, bin, reset)
+	fmt.Fprintf(w, "  %s%s unmount getting-started%s\n    Stop managing that workspace; keep local files.\n\n", orange, bin, reset)
 
 	fmt.Fprintf(w, "%sCommon Flows:%s\n", bold, reset)
-	fmt.Fprintf(w, "  %sFresh setup:%s %s%s auth login%s → %s%s ws mount getting-started ~/getting-started%s\n", dim, reset, orange, bin, reset, orange, bin, reset)
-	fmt.Fprintf(w, "  %sNew workspace:%s %s%s ws create demo%s → %s%s ws mount demo ~/demo%s\n", dim, reset, orange, bin, reset, orange, bin, reset)
-	fmt.Fprintf(w, "  %sImport existing files:%s %s%s ws import --mount-at-source demo ~/src/demo%s\n\n", dim, reset, orange, bin, reset)
+	fmt.Fprintf(w, "  %sFresh setup:%s %s%s auth login%s → %s%s mount getting-started ~/getting-started%s\n", dim, reset, orange, bin, reset, orange, bin, reset)
+	fmt.Fprintf(w, "  %sNew workspace:%s %s%s create demo%s → %s%s mount demo ~/demo%s\n", dim, reset, orange, bin, reset, orange, bin, reset)
+	fmt.Fprintf(w, "  %sImport existing files:%s %s%s import --mount-at-source demo ~/src/demo%s\n\n", dim, reset, orange, bin, reset)
 
 	fmt.Fprintf(w, "%sConfig:%s %s%s%s\n", bold, reset, dim, compactDisplayPath(configPath()), reset)
 }

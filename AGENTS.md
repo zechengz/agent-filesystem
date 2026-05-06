@@ -232,3 +232,6 @@ The most important implementation seams are:
   behavior, check for duplicate Vite listeners from sibling worktrees.
   `localhost` can hit an IPv6 listener from another checkout while
   `127.0.0.1` hits the current repo.
+- Control-plane import/checkpoint JSON fields typed as `map[string][]byte`
+  expect base64-encoded string values. Small synthetic manifests can avoid that
+  by using `ManifestEntry.inline`, which is already base64 text.

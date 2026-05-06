@@ -767,6 +767,36 @@ def curated_script_entries() -> list[Entry]:
 
     add(
         Entry(
+            id="script:scripts:loadtest-cloud-workspaces",
+            category="script",
+            name="AFS Cloud workspace load test",
+            description="Concurrent hosted control-plane load test for workspace import, read, session, checkpoint, and delete flows",
+            cwd=REPO_ROOT,
+            base_cmd=("python3", "scripts/loadtest_cloud_workspaces.py"),
+            source="scripts/loadtest_cloud_workspaces.py",
+            surface="python-script",
+            params=(
+                text_param("base-url", "--base-url", flag="--base-url", default="https://afs.cloud"),
+                text_param("database-id", "--database-id", flag="--database-id", help="Blank lets the control plane resolve the target database."),
+                text_param("prefix", "--prefix", flag="--prefix", help="Blank lets the script generate a unique load-<timestamp> prefix."),
+                text_param("workspaces", "--workspaces", flag="--workspaces", default="25"),
+                text_param("concurrency", "--concurrency", flag="--concurrency", default="5"),
+                text_param("duration-seconds", "--duration-seconds", flag="--duration-seconds", help="Set for time-boxed churn; 0 uses --workspaces."),
+                text_param("files-per-workspace", "--files-per-workspace", flag="--files-per-workspace", default="5"),
+                text_param("checkpoints-per-workspace", "--checkpoints-per-workspace", flag="--checkpoints-per-workspace", default="1"),
+                text_param("list-every", "--list-every", flag="--list-every", default="5"),
+                text_param("output-json", "--output-json", flag="--output-json", help="Optional path for a machine-readable summary."),
+                bool_param("yes", "--yes", flag="--yes", help="Required for non-local targets."),
+                bool_param("cleanup-only", "--cleanup-only", flag="--cleanup-only"),
+                bool_param("no-cleanup", "--no-cleanup", flag="--no-cleanup"),
+            ),
+            notes="Uses AFS_API_KEY or AFS_TOKEN for auth; requires --yes for afs.cloud and cleans up created workspaces by default.",
+            tags=("load", "cloud", "workspace", "control-plane", "afs.cloud"),
+        )
+    )
+
+    add(
+        Entry(
             id="script:scripts:capture-claude-fs-patterns",
             category="script",
             name="Claude filesystem access capture",

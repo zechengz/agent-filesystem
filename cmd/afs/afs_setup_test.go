@@ -58,6 +58,9 @@ func TestRunSetupWizardFirstRunPromptsOnlyForMode(t *testing.T) {
 	if cfg.Mode != modeMount {
 		t.Fatalf("Mode = %q, want %q", cfg.Mode, modeMount)
 	}
+	if cfg.MountBackend != defaultMountBackend() {
+		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, defaultMountBackend())
+	}
 
 	got := output.String()
 	for _, want := range []string{"Mode", "How should AFS expose the workspace locally?"} {
@@ -78,6 +81,28 @@ func TestRunSetupWizardFirstRunPromptsOnlyForMode(t *testing.T) {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("setup output unexpectedly contains %q:\n%s", forbidden, got)
 		}
+	}
+}
+
+func TestRunSetupWizardMountModePreservesConfiguredBackend(t *testing.T) {
+	t.Helper()
+
+	existing := defaultConfig()
+	existing.Mode = modeSync
+	existing.MountBackend = mountBackendFuse
+
+	reader := bufio.NewReader(bytes.NewBufferString("2\n"))
+	var output bytes.Buffer
+
+	cfg, err := runSetupWizard(reader, &output, existing, false)
+	if err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
+	}
+	if cfg.Mode != modeMount {
+		t.Fatalf("Mode = %q, want %q", cfg.Mode, modeMount)
+	}
+	if cfg.MountBackend != mountBackendFuse {
+		t.Fatalf("MountBackend = %q, want preserved %q", cfg.MountBackend, mountBackendFuse)
 	}
 }
 
@@ -125,6 +150,62 @@ func TestRunSetupWizardEditModePreservesWorkspaceAndLocalPath(t *testing.T) {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("setup output unexpectedly contains %q:\n%s", forbidden, got)
 		}
+	}
+}
+
+func TestCmdSetupChoosingMountPersistsUsableBackend(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+
+	helperDir := t.TempDir()
+	helperName := "agent-filesystem-mount"
+	if defaultMountBackend() == mountBackendNFS {
+		helperName = "agent-filesystem-nfs"
+	}
+	helperPath := filepath.Join(helperDir, helperName)
+	if err := os.WriteFile(helperPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile(helper) returned error: %v", err)
+	}
+	t.Setenv("PATH", helperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	stdinPath := filepath.Join(t.TempDir(), "setup-input.txt")
+	if err := os.WriteFile(stdinPath, []byte("2\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(stdin) returned error: %v", err)
+	}
+	stdinFile, err := os.Open(stdinPath)
+	if err != nil {
+		t.Fatalf("Open(stdin) returned error: %v", err)
+	}
+	defer stdinFile.Close()
+
+	origStdin := os.Stdin
+	os.Stdin = stdinFile
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+	})
+
+	_, err = captureStdout(t, cmdSetup)
+	if err != nil {
+		t.Fatalf("cmdSetup() returned error: %v", err)
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() returned error: %v", err)
+	}
+	if cfg.Mode != modeMount {
+		t.Fatalf("Mode = %q, want %q", cfg.Mode, modeMount)
+	}
+	if cfg.MountBackend != defaultMountBackend() {
+		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, defaultMountBackend())
 	}
 }
 

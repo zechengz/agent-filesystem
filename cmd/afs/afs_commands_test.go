@@ -397,6 +397,47 @@ func TestResolveWorkspaceSelectionFromControlPlanePrefersConfiguredWorkspaceID(t
 	}
 }
 
+func TestResolveMountBootstrapWorkspaceSelectionUsesConfiguredWorkspaceBeforeStaleMount(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = "http://afs.test"
+	cfg.CurrentWorkspace = "arrays-gs"
+	cfg.CurrentWorkspaceID = "ws_arrays"
+
+	if err := saveMountRegistry(mountRegistry{Mounts: []mountRecord{{
+		ID:              "mnt_old",
+		Workspace:       "getting-started",
+		WorkspaceID:     "ws_old",
+		LocalPath:       filepath.Join(t.TempDir(), "getting-started"),
+		ProductMode:     productModeSelfHosted,
+		ControlPlaneURL: cfg.URL,
+		PID:             os.Getpid(),
+		Mode:            modeSync,
+		StartedAt:       time.Now().UTC(),
+	}}}); err != nil {
+		t.Fatalf("saveMountRegistry() returned error: %v", err)
+	}
+
+	selection, err := resolveMountBootstrapWorkspaceSelection(context.Background(), cfg, stubAFSControlPlane{
+		workspaces: controlplane.WorkspaceListResponse{
+			Items: []controlplane.WorkspaceSummary{
+				{ID: "ws_arrays", Name: "arrays-gs", DatabaseName: "Arrays Server"},
+				{ID: "ws_shared", Name: "shared-memory", DatabaseName: "Redis Cloud"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("resolveMountBootstrapWorkspaceSelection() returned error: %v", err)
+	}
+	if selection.ID != "ws_arrays" || selection.Name != "arrays-gs" {
+		t.Fatalf("selection = %+v, want ws_arrays/arrays-gs", selection)
+	}
+}
+
 func TestResolveWorkspaceSelectionPrefersCWDMountedWorkspace(t *testing.T) {
 	t.Helper()
 

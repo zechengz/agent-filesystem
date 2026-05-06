@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,6 +101,150 @@ func TestMountWorkspaceUsesConfiguredLiveMountMode(t *testing.T) {
 	}
 	if rec.Mode != modeMount || rec.MountBackend != mountBackendNFS {
 		t.Fatalf("mount registry mode/backend = %q/%q, want %q/%q", rec.Mode, rec.MountBackend, modeMount, mountBackendNFS)
+	}
+}
+
+func TestMountWorkspaceRecordsCreatedLiveMountpoint(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() {
+		_ = rdb.Close()
+	})
+
+	sourceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(sourceDir, "README.md"), "hello\n")
+	seedWorkspaceFromDirectory(t, newAFSStore(rdb), "repo", "initial", sourceDir)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.Mode = modeMount
+	cfg.MountBackend = mountBackendNFS
+	cfg.NFSBin = "/bin/true"
+	saveTempConfig(t, cfg)
+
+	origStartMount := startMountServicesForWorkspaceMount
+	origStartSync := startSyncMountForWorkspaceMount
+	t.Cleanup(func() {
+		startMountServicesForWorkspaceMount = origStartMount
+		startSyncMountForWorkspaceMount = origStartSync
+	})
+
+	startMountServicesForWorkspaceMount = func(cfg config, sessionName string) (state, error) {
+		return state{
+			StartedAt:        time.Now().UTC(),
+			ProductMode:      cfg.ProductMode,
+			RedisAddr:        cfg.RedisAddr,
+			RedisDB:          cfg.RedisDB,
+			CurrentWorkspace: cfg.CurrentWorkspace,
+			MountPID:         4242,
+			MountBackend:     cfg.MountBackend,
+			LocalPath:        cfg.LocalPath,
+			CreatedLocalPath: true,
+			Mode:             modeMount,
+			RedisKey:         "ws_repo",
+		}, nil
+	}
+	startSyncMountForWorkspaceMount = func(ctx context.Context, cfg config, selection workspaceSelection, opts mountOptions) error {
+		t.Fatalf("startSyncMount called for mode=mount config")
+		return nil
+	}
+
+	localPath := filepath.Join(t.TempDir(), "repo")
+	if err := mountWorkspace(mountOptions{workspace: "repo", directory: localPath}); err != nil {
+		t.Fatalf("mountWorkspace() returned error: %v", err)
+	}
+
+	reg, err := loadMountRegistry()
+	if err != nil {
+		t.Fatalf("loadMountRegistry() returned error: %v", err)
+	}
+	rec, ok := mountByPath(reg, localPath)
+	if !ok {
+		t.Fatalf("expected live mount registry record at %s; got %#v", localPath, reg.Mounts)
+	}
+	if !rec.CreatedLocalPath {
+		t.Fatal("CreatedLocalPath = false, want true")
+	}
+}
+
+func TestStartLiveMountRejectsPopulatedLocalDirectoryWithoutYes(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	localPath := filepath.Join(t.TempDir(), "arrays-gs")
+	if err := os.MkdirAll(localPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(localPath) returned error: %v", err)
+	}
+	writeTestFile(t, filepath.Join(localPath, "README.md"), "local copy\n")
+
+	origStartMount := startMountServicesForWorkspaceMount
+	t.Cleanup(func() {
+		startMountServicesForWorkspaceMount = origStartMount
+	})
+	startMountServicesForWorkspaceMount = func(cfg config, sessionName string) (state, error) {
+		t.Fatalf("startMountServicesForWorkspaceMount should not be called for populated live mount target")
+		return state{}, nil
+	}
+
+	cfg := defaultConfig()
+	cfg.Mode = modeMount
+	cfg.MountBackend = mountBackendNFS
+	cfg.LocalPath = localPath
+	cfg.CurrentWorkspace = "arrays-gs"
+
+	err := startLiveMount(cfg, workspaceSelection{Name: "arrays-gs", ID: "ws_arrays"}, mountOptions{})
+	if err == nil {
+		t.Fatal("startLiveMount() returned nil error, want populated directory rejection")
+	}
+	if !strings.Contains(err.Error(), "live mount target") || !strings.Contains(err.Error(), "hide those files") {
+		t.Fatalf("startLiveMount() error = %q, want populated directory warning", err)
+	}
+}
+
+func TestStartLiveMountAllowsPopulatedLocalDirectoryWithYes(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	localPath := filepath.Join(t.TempDir(), "arrays-gs")
+	if err := os.MkdirAll(localPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(localPath) returned error: %v", err)
+	}
+	writeTestFile(t, filepath.Join(localPath, "README.md"), "local copy\n")
+
+	origStartMount := startMountServicesForWorkspaceMount
+	t.Cleanup(func() {
+		startMountServicesForWorkspaceMount = origStartMount
+	})
+	called := false
+	startMountServicesForWorkspaceMount = func(cfg config, sessionName string) (state, error) {
+		called = true
+		return state{
+			StartedAt:        time.Now().UTC(),
+			ProductMode:      cfg.ProductMode,
+			RedisAddr:        cfg.RedisAddr,
+			RedisDB:          cfg.RedisDB,
+			CurrentWorkspace: cfg.CurrentWorkspace,
+			MountBackend:     cfg.MountBackend,
+			LocalPath:        cfg.LocalPath,
+			Mode:             modeMount,
+			RedisKey:         "ws_arrays",
+		}, nil
+	}
+
+	cfg := defaultConfig()
+	cfg.Mode = modeMount
+	cfg.MountBackend = mountBackendNFS
+	cfg.LocalPath = localPath
+	cfg.CurrentWorkspace = "arrays-gs"
+
+	if err := startLiveMount(cfg, workspaceSelection{Name: "arrays-gs", ID: "ws_arrays"}, mountOptions{yes: true}); err != nil {
+		t.Fatalf("startLiveMount() returned error: %v", err)
+	}
+	if !called {
+		t.Fatal("startMountServicesForWorkspaceMount was not called")
 	}
 }
 
@@ -389,6 +534,75 @@ func TestUnmountWorkspaceTargetByWorkspaceName(t *testing.T) {
 	}
 	if _, ok := mountByPath(loaded, keepPath); !ok {
 		t.Fatalf("unrelated mount missing at %s", keepPath)
+	}
+}
+
+func TestPrintUnmountResultLabelsLiveMountpoint(t *testing.T) {
+	t.Helper()
+
+	out, err := captureStdout(t, func() error {
+		printUnmountResult(mountRecord{
+			Workspace: "arrays-gs",
+			LocalPath: filepath.Join(t.TempDir(), "arrays-gs"),
+			Mode:      modeMount,
+		}, false)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("captureStdout() returned error: %v", err)
+	}
+	if !strings.Contains(out, "mountpoint  preserved") {
+		t.Fatalf("output = %q, want live mountpoint preserved label", out)
+	}
+	if strings.Contains(out, "local  preserved") {
+		t.Fatalf("output = %q, should not label live mount preserved state as local files", out)
+	}
+}
+
+func TestStopMountRemovesCreatedEmptyLiveMountpoint(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	localPath := filepath.Join(t.TempDir(), "shared-memory")
+	if err := os.MkdirAll(localPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(localPath) returned error: %v", err)
+	}
+
+	rec := mountRecord{
+		Workspace:        "shared-memory",
+		LocalPath:        localPath,
+		Mode:             modeMount,
+		MountBackend:     mountBackendNone,
+		CreatedLocalPath: true,
+	}
+	if err := stopMount(rec, false); err != nil {
+		t.Fatalf("stopMount() returned error: %v", err)
+	}
+	if _, err := os.Stat(localPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("mountpoint stat error = %v, want removed mountpoint", err)
+	}
+}
+
+func TestStopMountPreservesUserCreatedLiveMountpoint(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	localPath := filepath.Join(t.TempDir(), "shared-memory")
+	if err := os.MkdirAll(localPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(localPath) returned error: %v", err)
+	}
+
+	rec := mountRecord{
+		Workspace:    "shared-memory",
+		LocalPath:    localPath,
+		Mode:         modeMount,
+		MountBackend: mountBackendNone,
+	}
+	if err := stopMount(rec, false); err != nil {
+		t.Fatalf("stopMount() returned error: %v", err)
+	}
+	if _, err := os.Stat(localPath); err != nil {
+		t.Fatalf("mountpoint stat error = %v, want preserved mountpoint", err)
 	}
 }
 

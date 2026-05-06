@@ -35,6 +35,7 @@ type mountRecord struct {
 	RedisKey             string    `json:"redis_key"`
 	PID                  int       `json:"pid"`
 	ReadOnly             bool      `json:"read_only,omitempty"`
+	CreatedLocalPath     bool      `json:"created_local_path,omitempty"`
 	SyncLog              string    `json:"sync_log,omitempty"`
 	StartedAt            time.Time `json:"started_at"`
 }

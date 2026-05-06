@@ -212,6 +212,19 @@ The most important implementation seams are:
   `go list` can trigger dependency downloads in those nested modules.
 - `afs setup` owns only the default local mode prompt. Workspace selection and
   local directory prompts belong under `afs ws mount`, not setup.
+- When `afs setup` selects Live Mount, it must still save a concrete mount
+  backend. `mode=mount` with `runtime.mount.backend=none` is invalid and makes
+  `afs mount <workspace>` fail before workspace resolution.
+- Live mount startup must treat the workspace selected by `afs mount` as an
+  explicit target. Do not let CWD/single-mounted-workspace fallbacks override
+  that selection during session bootstrap.
+- Live NFS/FUSE mounts overlay the local directory; they do not materialize or
+  clean up workspace files. Guard against mounting over populated directories
+  unless the user explicitly opts in, or old sync copies will reappear after
+  unmount and look like copied live-mount contents.
+- If live mount startup creates the mountpoint directory, persist that fact in
+  the mount registry and remove the empty mountpoint on unmount. Preserve
+  user-created directories.
 - `example.afs.config.json` should mirror the canonical persisted config shape:
   an empty `workspace.default` to force an explicit user choice; no root
   `currentWorkspace` or `localPath` keys.

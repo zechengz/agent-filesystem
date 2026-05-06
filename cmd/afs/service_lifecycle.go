@@ -421,7 +421,7 @@ func prepareMountBootstrap(ctx context.Context, cfg config, sessionName ...strin
 		}
 	}
 
-	selection, err := currentWorkspaceSelectionFromControlPlane(ctx, resolvedCfg, service)
+	selection, err := resolveMountBootstrapWorkspaceSelection(ctx, resolvedCfg, service)
 	if err != nil {
 		closeFn()
 		return mountBootstrap{}, func() {}, fmt.Errorf("a workspace is required before AFS can mount a filesystem: %w", err)
@@ -453,6 +453,13 @@ func prepareMountBootstrap(ctx context.Context, cfg config, sessionName ...strin
 		sessionID:       strings.TrimSpace(session.SessionID),
 		heartbeatEvery:  time.Duration(session.HeartbeatIntervalSeconds) * time.Second,
 	}, closeFn, nil
+}
+
+func resolveMountBootstrapWorkspaceSelection(ctx context.Context, cfg config, service afsControlPlane) (workspaceSelection, error) {
+	if ref := configuredWorkspaceReference(cfg); ref != "" {
+		return resolveWorkspaceSelectionFromControlPlane(ctx, cfg, service, ref)
+	}
+	return currentWorkspaceSelectionFromControlPlane(ctx, cfg, service)
 }
 
 func shouldCleanLegacyMountCache(st state) bool {

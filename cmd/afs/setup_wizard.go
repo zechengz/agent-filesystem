@@ -92,7 +92,29 @@ func runModeSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 	if err := promptModeSetup(r, out, &cfg); err != nil {
 		return cfg, err
 	}
+	if err := ensureSetupModeRuntimeDefaults(&cfg); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
+}
+
+func ensureSetupModeRuntimeDefaults(cfg *config) error {
+	mode, err := effectiveMode(*cfg)
+	if err != nil {
+		return err
+	}
+	if mode != modeMount {
+		return nil
+	}
+	backendName, err := normalizeMountBackend(cfg.MountBackend)
+	if err != nil {
+		return err
+	}
+	if backendName == mountBackendNone {
+		backendName = defaultMountBackend()
+	}
+	cfg.MountBackend = backendName
+	return nil
 }
 
 // promptModeSetup lets the user pick between the Dropbox-style sync daemon

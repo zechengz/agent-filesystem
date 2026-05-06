@@ -226,6 +226,9 @@ func startLiveMount(cfg config, selection workspaceSelection, opts mountOptions)
 	if strings.TrimSpace(cfg.LocalPath) == "" {
 		return errors.New("mount requires a local directory")
 	}
+	if err := validateLiveMountLocalPath(cfg.LocalPath, opts.yes); err != nil {
+		return err
+	}
 	if err := validateUpModeSelection(cfg); err != nil {
 		return err
 	}
@@ -245,6 +248,21 @@ func startLiveMount(cfg config, selection workspaceSelection, opts mountOptions)
 	}
 	recordMountShellDirectory(st.LocalPath)
 	return nil
+}
+
+func validateLiveMountLocalPath(localPath string, allowPopulated bool) error {
+	entryCount, err := countMountableLocalEntries(localPath)
+	if err != nil {
+		return err
+	}
+	if entryCount == 0 || allowPopulated {
+		return nil
+	}
+	entryLabel := "entries"
+	if entryCount == 1 {
+		entryLabel = "entry"
+	}
+	return fmt.Errorf("live mount target %s contains %d local %s; AFS would hide those files while mounted and reveal them again after unmount\nChoose an empty directory, move the existing files aside, or pass --yes to mount over the populated directory", localPath, entryCount, entryLabel)
 }
 
 func registerLiveMount(st state) error {
@@ -277,6 +295,7 @@ func mountRecordFromLiveState(st state, id string) mountRecord {
 		RedisKey:             st.RedisKey,
 		PID:                  st.MountPID,
 		ReadOnly:             st.ReadOnly,
+		CreatedLocalPath:     st.CreatedLocalPath,
 		StartedAt:            st.StartedAt,
 	}
 }
@@ -943,6 +962,12 @@ func stopMount(rec mountRecord, deleteLocal bool) error {
 		if workspace := strings.TrimSpace(rec.Workspace); workspace != "" {
 			_ = removeSyncState(workspace)
 		}
+	} else if strings.TrimSpace(rec.Mode) == modeMount && rec.CreatedLocalPath {
+		if localPath := strings.TrimSpace(rec.LocalPath); localPath != "" {
+			if err := removeEmptyMountpoint(localPath); err != nil {
+				return err
+			}
+		}
 	}
 	return removeLegacyStateForMount(rec)
 }
@@ -987,13 +1012,22 @@ func configFromMount(rec mountRecord) config {
 
 func printUnmountResult(rec mountRecord, deleteLocal bool) {
 	local := "preserved"
+	label := "local"
 	if deleteLocal {
 		local = "deleted"
+	}
+	if strings.TrimSpace(rec.Mode) == modeMount {
+		label = "mountpoint"
+		if !deleteLocal && rec.CreatedLocalPath {
+			if _, err := os.Stat(rec.LocalPath); errors.Is(err, os.ErrNotExist) {
+				local = "removed"
+			}
+		}
 	}
 	printSection("Workspace unmounted", []outputRow{
 		{Label: "workspace", Value: rec.Workspace},
 		{Label: "path", Value: compactDisplayPath(rec.LocalPath)},
-		{Label: "local", Value: local},
+		{Label: label, Value: local},
 	})
 }
 
@@ -1041,6 +1075,8 @@ Use --session to name this mount session separately from agent.name.
 When mounting to a populated local folder, AFS shows the safe reconciliation
 plan and asks before uploading or downloading files. Use --yes to accept a
 safe plan non-interactively; conflicts still block mount.
+Live Mount mode requires an empty local folder unless --yes is passed, because
+the NFS/FUSE mount hides any local files that already exist there.
 The directory is preserved on unmount unless --delete is used.
 `, bin)
 }
@@ -1051,7 +1087,7 @@ func unmountUsageText(bin string) string {
 
 Unmount an AFS workspace by workspace name, workspace ID, or local directory.
 With no target, lists mounted workspaces and prompts for a selection.
-By default, local files are preserved. Use --delete only when you want to
-remove the mounted local directory after the daemon stops.
+By default, the local folder is preserved. Use --delete only when you want to
+remove the local directory after the daemon stops.
 `, bin)
 }

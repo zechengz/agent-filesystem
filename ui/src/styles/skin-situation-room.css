@@ -225,17 +225,17 @@
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   Body baseline (mono-first, situation-room only)
+   Body baseline (sans-first, situation-room only)
    Classic baseline lives in index.css.
    ════════════════════════════════════════════════════════════════════ */
 
 [data-skin="situation-room"] body {
   background: var(--afs-bg);
   color: var(--afs-ink);
-  font-family: var(--afs-font-mono);
+  font-family: var(--afs-font-sans);
   font-size: var(--afs-fz-md);
   line-height: var(--afs-lh-base);
-  letter-spacing: var(--afs-tr-body);
+  letter-spacing: 0;
   -webkit-font-smoothing: antialiased;
 }
 

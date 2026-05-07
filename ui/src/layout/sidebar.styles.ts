@@ -7,11 +7,12 @@ export const SidebarContainer = styled.div`
   height: 100%;
   min-height: 0;
   flex-shrink: 0;
-  overflow: hidden;
+  overflow: visible;
 
   [data-role="nav-bar"] {
     height: 100% !important;
     max-height: 100% !important;
+    overflow: visible !important;
   }
 `;
 
@@ -168,8 +169,10 @@ export const ProfileName = styled.div`
 
 export const ProfileMeta = styled.div`
   min-width: 0;
-  overflow-wrap: anywhere;
-  white-space: normal;
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--afs-muted);
 `;

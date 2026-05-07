@@ -492,6 +492,9 @@ const WorkspaceTableBlock = styled(S.TableBlock)<{ $fillAvailableHeight: boolean
 `;
 
 const WorkspaceTableCard = styled(S.TableCard)<{ $fillAvailableHeight: boolean }>`
+  overflow-x: auto;
+  overflow-y: hidden;
+
   ${({ $fillAvailableHeight }) =>
     $fillAvailableHeight &&
     css`
@@ -503,6 +506,11 @@ const WorkspaceTableCard = styled(S.TableCard)<{ $fillAvailableHeight: boolean }
 `;
 
 const WorkspaceTableViewport = styled(S.DenseTableViewport)<{ $fillAvailableHeight: boolean }>`
+  width: max-content;
+  min-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+
   ${({ $fillAvailableHeight }) =>
     $fillAvailableHeight &&
     css`
@@ -605,7 +613,6 @@ const IdRow = styled.div`
 
 const IdText = styled.span`
   flex: 1 1 auto;
-  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: 11px;
   color: var(--afs-muted, #71717a);
   line-height: 1.2;

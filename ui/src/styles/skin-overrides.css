@@ -114,7 +114,6 @@
   border-radius: var(--afs-r-2) !important;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  font-family: var(--afs-font-mono);
   font-size: var(--afs-fz-sm);
 }
 
@@ -133,8 +132,8 @@
 }
 
 [data-skin="situation-room"] [data-afs-profile-avatar] {
-  background: var(--afs-accent) !important;
-  color: var(--afs-ink-on-accent) !important;
+  background: #E6E6E6 !important;
+  color: #000000 !important;
 }
 
 /* ── Profile dropdown ──────────────────────────────────────────── */

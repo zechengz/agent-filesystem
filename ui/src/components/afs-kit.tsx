@@ -61,7 +61,6 @@ export const StatLabel = styled.span`
   text-transform: uppercase;
 
   [data-skin="situation-room"] && {
-    font-family: var(--afs-font-mono);
     color: var(--afs-accent);
     font-size: var(--afs-fz-xs);
     font-weight: var(--afs-fw-regular);
@@ -78,9 +77,8 @@ export const StatValue = styled.span`
   letter-spacing: -0.04em;
 
   [data-skin="situation-room"] && {
-    font-family: var(--afs-font-mono);
     font-weight: var(--afs-fw-medium);
-    letter-spacing: var(--afs-tr-tight);
+    letter-spacing: 0;
   }
 `;
 
@@ -90,10 +88,9 @@ export const StatDetail = styled.span`
   line-height: 1.5;
 
   [data-skin="situation-room"] && {
-    font-family: var(--afs-font-mono);
     color: var(--afs-ink-dim);
     font-size: var(--afs-fz-xs);
-    letter-spacing: var(--afs-tr-body);
+    letter-spacing: 0;
   }
 `;
 
@@ -190,7 +187,6 @@ export const Tag = styled.span`
     background: transparent;
     border-color: var(--afs-line-strong);
     color: var(--afs-ink-dim);
-    font-family: var(--afs-font-mono);
     font-size: var(--afs-fz-xs);
     font-weight: var(--afs-fw-regular);
     letter-spacing: var(--afs-tr-label);
@@ -233,7 +229,6 @@ export const ToneChip = styled.span<{
     border: 1px solid var(--afs-line-strong);
     background: transparent;
     color: var(--afs-accent);
-    font-family: var(--afs-font-mono);
     font-size: var(--afs-fz-xs);
     font-weight: var(--afs-fw-regular);
     letter-spacing: var(--afs-tr-caps);
@@ -269,7 +264,6 @@ const FieldGroupLegend = styled.legend`
   text-transform: uppercase;
 
   [data-skin="situation-room"] && {
-    font-family: var(--afs-font-mono);
     color: var(--afs-accent);
     font-weight: var(--afs-fw-regular);
     letter-spacing: var(--afs-tr-caps);
@@ -310,7 +304,6 @@ export const Field = styled.label`
   font-weight: 700;
 
   [data-skin="situation-room"] && {
-    font-family: var(--afs-font-mono);
     color: var(--afs-ink-dim);
     font-weight: var(--afs-fw-regular);
     letter-spacing: var(--afs-tr-caps);
@@ -347,7 +340,6 @@ const fieldBase = css`
     border-color: var(--afs-line-strong);
     background: var(--afs-bg);
     color: var(--afs-ink);
-    font-family: var(--afs-font-mono);
     font-size: var(--afs-fz-md);
 
     &::placeholder {
@@ -400,9 +392,8 @@ export const NoticeTitle = styled.div`
   font-weight: 700;
 
   [data-skin="situation-room"] && {
-    font-family: var(--afs-font-mono);
     font-weight: var(--afs-fw-medium);
-    letter-spacing: var(--afs-tr-body);
+    letter-spacing: 0;
   }
 `;
 
@@ -414,7 +405,6 @@ export const NoticeBody = styled.div`
 
   [data-skin="situation-room"] && {
     color: var(--afs-ink-dim);
-    font-family: var(--afs-font-mono);
   }
 `;
 
@@ -458,7 +448,6 @@ export const TabButton = styled.button<{ $active?: boolean }>`
     border-radius: var(--afs-r-1);
     background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "transparent")};
     color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-ink-dim)")};
-    font-family: var(--afs-font-mono);
     font-weight: var(--afs-fw-regular);
     letter-spacing: var(--afs-tr-caps);
     text-transform: uppercase;
@@ -516,7 +505,6 @@ export const FileButton = styled.button<{ $active?: boolean }>`
     border-left: 2px solid ${({ $active }) => ($active ? "var(--afs-accent)" : "transparent")};
     background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-bg-1)")};
     color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-ink-dim)")};
-    font-family: var(--afs-font-mono);
 
     &:hover {
       transform: none;
@@ -578,7 +566,6 @@ export const PageDescription = styled.p`
 
   [data-skin="situation-room"] && {
     color: var(--afs-ink-dim);
-    font-family: var(--afs-font-mono);
     font-size: var(--afs-fz-md);
   }
 `;
@@ -660,9 +647,8 @@ export const DialogTitle = styled.h2`
   line-height: 1.3;
 
   [data-skin="situation-room"] && {
-    font-family: var(--afs-font-mono);
     font-weight: var(--afs-fw-medium);
-    letter-spacing: var(--afs-tr-tight);
+    letter-spacing: 0;
   }
 `;
 
@@ -674,7 +660,6 @@ export const DialogBody = styled.p`
 
   [data-skin="situation-room"] && {
     color: var(--afs-ink-dim);
-    font-family: var(--afs-font-mono);
   }
 `;
 

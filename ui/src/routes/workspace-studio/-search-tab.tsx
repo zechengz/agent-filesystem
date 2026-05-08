@@ -1,5 +1,5 @@
 import { Button, Select } from "@redis-ui/components";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import styled from "styled-components";
 import {
   DialogActions,
@@ -21,15 +21,13 @@ import {
 import {
   useQueryWorkspaceMutation,
   useRebuildWorkspaceQueryIndexMutation,
-  useUpdateWorkspaceConfigMutation,
-  useWorkspaceConfig,
   useWorkspaceQueryIndexStatus,
 } from "../../foundation/hooks/use-afs";
 import type {
   AFSFileQueryMode,
   AFSFileQueryResponse,
-  AFSWorkspaceConfig,
   AFSWorkspaceDetail,
+  AFSWorkspaceQueryEmbeddingStatus,
   AFSWorkspaceQueryIndexStatus,
 } from "../../foundation/types/afs";
 
@@ -45,90 +43,18 @@ export function SearchTab({ workspace }: Props) {
   const [rebuildDialogOpen, setRebuildDialogOpen] = useState(false);
   const [rebuildPath, setRebuildPath] = useState("/");
   const [forceRebuild, setForceRebuild] = useState(false);
-  const [embeddingsDialogOpen, setEmbeddingsDialogOpen] = useState(false);
-  const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
-  const [settingsError, setSettingsError] = useState<string | null>(null);
-  const [embeddingsEnabled, setEmbeddingsEnabled] = useState(false);
-  const [embeddingsModel, setEmbeddingsModel] = useState("");
-  const [chunkStrategy, setChunkStrategy] = useState<"auto" | "regex">("auto");
-  const [draftEmbeddingsModel, setDraftEmbeddingsModel] = useState("");
-  const [draftChunkStrategy, setDraftChunkStrategy] = useState<"auto" | "regex">("auto");
 
   const statusQuery = useWorkspaceQueryIndexStatus({
     databaseId: workspace.databaseId,
     workspaceId: workspace.id,
     path: "/",
   });
-  const configQuery = useWorkspaceConfig({
-    databaseId: workspace.databaseId,
-    workspaceId: workspace.id,
-  });
   const rebuildIndex = useRebuildWorkspaceQueryIndexMutation();
-  const updateConfig = useUpdateWorkspaceConfigMutation();
   const queryWorkspace = useQueryWorkspaceMutation();
-
-  useEffect(() => {
-    const config = configQuery.data;
-    if (config == null) {
-      return;
-    }
-    setEmbeddingsEnabled(config.query.embeddings.enabled);
-    setEmbeddingsModel(config.query.embeddings.model);
-    setChunkStrategy(config.query.embeddings.chunkStrategy === "regex" ? "regex" : "auto");
-    setDraftEmbeddingsModel(config.query.embeddings.model);
-    setDraftChunkStrategy(config.query.embeddings.chunkStrategy === "regex" ? "regex" : "auto");
-  }, [configQuery.data]);
 
   const status = statusQuery.data;
   const progress = status ? queryProgress(status) : 0;
   const queryResult = queryWorkspace.data;
-
-  function saveQuerySettings(input: {
-    enabled: boolean;
-    model: string;
-    chunkStrategy: "auto" | "regex";
-    closeDialog?: boolean;
-  }) {
-    const current = configQuery.data ?? defaultWorkspaceConfig();
-    const next: AFSWorkspaceConfig = {
-      ...current,
-      query: {
-        embeddings: {
-          enabled: input.enabled,
-          model: input.model.trim(),
-          chunkStrategy: input.chunkStrategy,
-        },
-      },
-    };
-    setSettingsError(null);
-    setSettingsNotice(null);
-    void updateConfig
-      .mutateAsync({
-        databaseId: workspace.databaseId,
-        workspaceId: workspace.id,
-        config: next,
-      })
-      .then(() => {
-        setEmbeddingsEnabled(input.enabled);
-        setEmbeddingsModel(input.model.trim());
-        setChunkStrategy(input.chunkStrategy);
-        setSettingsNotice("Settings saved.");
-        if (input.closeDialog) {
-          setEmbeddingsDialogOpen(false);
-        }
-      })
-      .catch((error) => {
-        setSettingsError(
-          error instanceof Error ? error.message : "Unable to save query settings.",
-        );
-      });
-  }
-
-  function openEmbeddingsDialog() {
-    setDraftEmbeddingsModel(embeddingsModel);
-    setDraftChunkStrategy(chunkStrategy);
-    setEmbeddingsDialogOpen(true);
-  }
 
   function runQuery() {
     const normalizedLimit = parsePositiveInt(limit, 10);
@@ -227,36 +153,11 @@ export function SearchTab({ workspace }: Props) {
         <SectionCard $span={6}>
           <SectionHeader>
             <SectionTitle
-              title="Settings"
-              body="Workspace search options."
+              title="Semantic Embeddings"
+              body="Global provider status."
             />
-            <Button
-              size="medium"
-              type="button"
-              variant="secondary-fill"
-              onClick={openEmbeddingsDialog}
-            >
-              More &gt;
-            </Button>
           </SectionHeader>
-          <SettingsControlRow>
-            <SwitchControl
-              checked={embeddingsEnabled}
-              disabled={updateConfig.isPending || configQuery.isLoading}
-              label="Semantic Embeddings"
-              onChange={(nextEnabled) => {
-                setEmbeddingsEnabled(nextEnabled);
-                saveQuerySettings({
-                  enabled: nextEnabled,
-                  model: embeddingsModel,
-                  chunkStrategy,
-                });
-              }}
-            />
-            <ToggleStateText>{embeddingsEnabled ? "On" : "Off"}</ToggleStateText>
-          </SettingsControlRow>
-          {settingsError ? <DialogError role="alert">{settingsError}</DialogError> : null}
-          {settingsNotice ? <Notice role="status">{settingsNotice}</Notice> : null}
+          <EmbeddingStatusBlock status={status?.embeddings} />
         </SectionCard>
 
         <SectionCard $span={12}>
@@ -404,91 +305,26 @@ export function SearchTab({ workspace }: Props) {
         </DialogOverlay>
       ) : null}
 
-      {embeddingsDialogOpen ? (
-        <DialogOverlay
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="semantic-embeddings-title"
-          onClick={() => {
-            if (!updateConfig.isPending) {
-              setEmbeddingsDialogOpen(false);
-            }
-          }}
-        >
-          <DialogCard onClick={(event) => event.stopPropagation()}>
-            <DialogHeader>
-              <div>
-                <DialogTitle id="semantic-embeddings-title">
-                  Semantic embeddings
-                </DialogTitle>
-                <DialogBody>
-                  Configure the semantic-only query settings for this workspace.
-                </DialogBody>
-              </div>
-              <DialogCloseButton
-                type="button"
-                aria-label="Close"
-                onClick={() => setEmbeddingsDialogOpen(false)}
-                disabled={updateConfig.isPending}
-              >
-                ×
-              </DialogCloseButton>
-            </DialogHeader>
-            <FormGrid
-              onSubmit={(event) => {
-                event.preventDefault();
-                saveQuerySettings({
-                  enabled: embeddingsEnabled,
-                  model: draftEmbeddingsModel,
-                  chunkStrategy: draftChunkStrategy,
-                  closeDialog: true,
-                });
-              }}
-            >
-              <Field>
-                Embedding model
-                <TextInput
-                  value={draftEmbeddingsModel}
-                  onChange={(event) => setDraftEmbeddingsModel(event.currentTarget.value)}
-                  placeholder="embeddinggemma"
-                />
-              </Field>
-              <Field>
-                Chunk strategy
-                <SelectWrap>
-                  <Select
-                    aria-label="Chunk strategy"
-                    options={[
-                      { value: "auto", label: "Auto" },
-                      { value: "regex", label: "Regex" },
-                    ]}
-                    value={draftChunkStrategy}
-                    onChange={(next) =>
-                      setDraftChunkStrategy(next === "regex" ? "regex" : "auto")
-                    }
-                  />
-                </SelectWrap>
-              </Field>
-              {settingsError ? <DialogError role="alert">{settingsError}</DialogError> : null}
-              <DialogActions style={{ justifyContent: "flex-end" }}>
-                <Button
-                  size="medium"
-                  type="button"
-                  variant="secondary-fill"
-                  onClick={() => setEmbeddingsDialogOpen(false)}
-                  disabled={updateConfig.isPending}
-                >
-                  Cancel
-                </Button>
-                <Button size="medium" type="submit" disabled={updateConfig.isPending}>
-                  {updateConfig.isPending ? "Saving..." : "Save settings"}
-                </Button>
-              </DialogActions>
-            </FormGrid>
-          </DialogCard>
-        </DialogOverlay>
-      ) : null}
     </>
+  );
+}
+
+function EmbeddingStatusBlock({ status }: { status?: AFSWorkspaceQueryEmbeddingStatus }) {
+  const tone = status == null ? "neutral" : status.available ? "good" : "warn";
+  return (
+    <EmbeddingStatusPanel>
+      <IndexStatusBlock>
+        <SearchBadge $tone={tone}>
+          {status == null ? "Checking" : status.available ? "Ready" : "Unavailable"}
+        </SearchBadge>
+        <IndexStatusText>{embeddingStatusText(status)}</IndexStatusText>
+      </IndexStatusBlock>
+      <IndexFacts>
+        <span>{status?.provider || "openai"}</span>
+        <span>{status?.model || "openai:text-embedding-3-small"}</span>
+        {status?.dimension ? <span>{status.dimension} dimensions</span> : null}
+      </IndexFacts>
+    </EmbeddingStatusPanel>
   );
 }
 
@@ -558,27 +394,6 @@ function QueryResults({ response }: { response: AFSFileQueryResponse }) {
       )}
     </ResultsBlock>
   );
-}
-
-function defaultWorkspaceConfig(): AFSWorkspaceConfig {
-  return {
-    versioning: {
-      mode: "off",
-      includeGlobs: [],
-      excludeGlobs: [],
-      maxVersionsPerFile: 0,
-      maxAgeDays: 0,
-      maxTotalBytes: 0,
-      largeFileCutoffBytes: 0,
-    },
-    query: {
-      embeddings: {
-        enabled: false,
-        model: "",
-        chunkStrategy: "auto",
-      },
-    },
-  };
 }
 
 function normalizeWorkspacePath(value: string) {
@@ -660,6 +475,16 @@ function statusLabel(status?: AFSWorkspaceQueryIndexStatus) {
     default:
       return status.state || "Unknown";
   }
+}
+
+function embeddingStatusText(status?: AFSWorkspaceQueryEmbeddingStatus) {
+  if (!status) {
+    return "Checking semantic embedding provider.";
+  }
+  if (status.available) {
+    return status.message || "Semantic-only query is available.";
+  }
+  return status.message || "Semantic-only query will quietly return no vector results.";
 }
 
 function lineRange(result: { startLine?: number; endLine?: number }) {
@@ -757,10 +582,9 @@ const IndexFacts = styled.div`
   font-size: 12px;
 `;
 
-const SettingsControlRow = styled.div`
+const EmbeddingStatusPanel = styled.div`
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
   gap: 16px;
   border: 1px solid var(--afs-line);
   border-radius: 8px;
@@ -768,20 +592,8 @@ const SettingsControlRow = styled.div`
   background: var(--afs-panel);
 `;
 
-const ToggleStateText = styled.span`
-  color: var(--afs-muted);
-  font-size: 13px;
-  font-weight: 700;
-`;
-
 const SelectWrap = styled.div`
   min-width: 0;
-`;
-
-const Notice = styled.div`
-  color: #15803d;
-  font-size: 13px;
-  font-weight: 700;
 `;
 
 const QueryForm = styled.form`

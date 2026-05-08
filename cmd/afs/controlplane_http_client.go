@@ -24,6 +24,7 @@ type httpControlPlaneClient struct {
 	databaseID string
 	authToken  string
 	client     *http.Client
+	queryer    *http.Client
 	importer   *http.Client
 }
 
@@ -106,6 +107,9 @@ func newHTTPControlPlaneClient(ctx context.Context, cfg config) (*httpControlPla
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		queryer: &http.Client{
+			Timeout: 15 * time.Minute,
+		},
 		importer: &http.Client{
 			Timeout: 15 * time.Minute,
 		},
@@ -131,6 +135,9 @@ func newAnonymousHTTPControlPlaneClient(baseURL string) (*httpControlPlaneClient
 		baseURL: normalized,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
+		},
+		queryer: &http.Client{
+			Timeout: 15 * time.Minute,
 		},
 		importer: &http.Client{
 			Timeout: 15 * time.Minute,
@@ -385,7 +392,7 @@ func (c *httpControlPlaneClient) GetFileContent(ctx context.Context, workspace, 
 
 func (c *httpControlPlaneClient) QueryWorkspace(ctx context.Context, workspace string, request mcptools.FileQueryRequest) (mcptools.FileQueryResponse, error) {
 	var out mcptools.FileQueryResponse
-	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace, "query"), request, &out, http.StatusOK)
+	err := c.doJSONWithClient(ctx, c.queryer, http.MethodPost, c.workspacePath(workspace, "query"), request, &out, http.StatusOK)
 	return out, err
 }
 
@@ -405,7 +412,7 @@ func (c *httpControlPlaneClient) QueryIndexStatus(ctx context.Context, workspace
 
 func (c *httpControlPlaneClient) RebuildQueryIndex(ctx context.Context, workspace string, request controlplane.WorkspaceQueryIndexRebuildRequest) (controlplane.WorkspaceQueryIndexRebuildResponse, error) {
 	var out controlplane.WorkspaceQueryIndexRebuildResponse
-	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace, "query", "index", "rebuild"), request, &out, http.StatusOK)
+	err := c.doJSONWithClient(ctx, c.queryer, http.MethodPost, c.workspacePath(workspace, "query", "index", "rebuild"), request, &out, http.StatusOK)
 	return out, err
 }
 

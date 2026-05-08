@@ -117,14 +117,14 @@ func formatCLIError(err error) string {
 func splitErrorBlocks(message string) []string {
 	rawBlocks := strings.Split(message, "\n\n")
 	blocks := make([]string, 0, len(rawBlocks))
-	for _, raw := range rawBlocks {
+	for i, raw := range rawBlocks {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
 		}
 		if isUsageBlock(raw) {
-			blocks = append(blocks, raw)
-			continue
+			blocks = append(blocks, formatUsageBlock(rawBlocks[i:]))
+			break
 		}
 		lines := nonEmptyErrorLines(raw)
 		if len(lines) == 0 {
@@ -157,6 +157,17 @@ func splitErrorBlocks(message string) []string {
 		return []string{"Unknown error."}
 	}
 	return blocks
+}
+
+func formatUsageBlock(rawBlocks []string) string {
+	blocks := make([]string, 0, len(rawBlocks))
+	for _, raw := range rawBlocks {
+		raw = strings.TrimSpace(raw)
+		if raw != "" {
+			blocks = append(blocks, raw)
+		}
+	}
+	return strings.Join(blocks, "\n\n")
 }
 
 func nonEmptyErrorLines(raw string) []string {

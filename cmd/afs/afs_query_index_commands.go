@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
 )
@@ -22,6 +23,8 @@ func runWorkspaceQueryIndex(workspace string, args []string) error {
 	switch subcommand {
 	case "status":
 		return runWorkspaceQueryIndexStatus(workspace, args[1:])
+	case "create":
+		return runWorkspaceQueryIndexCreate(workspace, args[1:])
 	case "rebuild":
 		return runWorkspaceQueryIndexRebuild(workspace, args[1:])
 	case "clean":
@@ -51,17 +54,27 @@ func runWorkspaceQueryIndexStatus(workspace string, args []string) error {
 	return writeWorkspaceQueryIndexStatus(status, jsonOut)
 }
 
+func runWorkspaceQueryIndexCreate(workspace string, args []string) error {
+	return runWorkspaceQueryIndexRebuildWithOptions(workspace, args, true)
+}
+
 func runWorkspaceQueryIndexRebuild(workspace string, args []string) error {
+	return runWorkspaceQueryIndexRebuildWithOptions(workspace, args, false)
+}
+
+func runWorkspaceQueryIndexRebuildWithOptions(workspace string, args []string, create bool) error {
 	fs := flag.NewFlagSet("query index rebuild", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var path string
 	var wait bool
 	var force bool
 	var jsonOut bool
+	var embeddings bool
 	fs.StringVar(&path, "path", "/", "workspace path scope")
 	fs.BoolVar(&wait, "wait", false, "wait for rebuild completion")
 	fs.BoolVar(&force, "force", false, "rebuild existing chunks")
 	fs.BoolVar(&jsonOut, "json", false, "write JSON output")
+	fs.BoolVar(&embeddings, "embeddings", create, "build semantic embeddings")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%s", workspaceQueryIndexUsageText(filepath.Base(os.Args[0])))
 	}
@@ -74,16 +87,55 @@ func runWorkspaceQueryIndexRebuild(workspace string, args []string) error {
 		return err
 	}
 	defer remote.close()
-	response, err := remote.controlPlane.RebuildQueryIndex(ctx, remote.selection.ID, controlplane.WorkspaceQueryIndexRebuildRequest{
-		Workspace: remote.selection.Name,
-		Path:      normalizeFSRemotePath(path),
-		Force:     force,
-		Wait:      wait,
-	})
+	request := controlplane.WorkspaceQueryIndexRebuildRequest{
+		Workspace:  remote.selection.Name,
+		Path:       normalizeFSRemotePath(path),
+		Force:      force,
+		Wait:       wait || create,
+		Embeddings: embeddings,
+	}
+	var response controlplane.WorkspaceQueryIndexRebuildResponse
+	if !jsonOut && (request.Wait || request.Embeddings) {
+		response, err = rebuildQueryIndexWithProgress(ctx, remote, request)
+	} else {
+		response, err = remote.controlPlane.RebuildQueryIndex(ctx, remote.selection.ID, request)
+	}
 	if err != nil {
 		return err
 	}
 	return writeWorkspaceQueryIndexRebuild(response, jsonOut)
+}
+
+func rebuildQueryIndexWithProgress(ctx context.Context, remote *fsRemoteWorkspace, request controlplane.WorkspaceQueryIndexRebuildRequest) (controlplane.WorkspaceQueryIndexRebuildResponse, error) {
+	type rebuildResult struct {
+		response controlplane.WorkspaceQueryIndexRebuildResponse
+		err      error
+	}
+	done := make(chan rebuildResult, 1)
+	go func() {
+		response, err := remote.controlPlane.RebuildQueryIndex(ctx, remote.selection.ID, request)
+		done <- rebuildResult{response: response, err: err}
+	}()
+
+	started := time.Now()
+	fmt.Fprintf(os.Stderr, "Building query index for %s (%s)", remote.selection.Name, normalizeFSRemotePath(request.Path))
+	if request.Embeddings {
+		fmt.Fprint(os.Stderr, ": keyword chunks and semantic embeddings")
+	} else {
+		fmt.Fprint(os.Stderr, ": keyword chunks")
+	}
+	fmt.Fprintln(os.Stderr)
+
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case result := <-done:
+			return result.response, result.err
+		case <-ticker.C:
+			fmt.Fprintf(os.Stderr, "Still building query index for %s after %s...\n", remote.selection.Name, formatStepDuration(time.Since(started)))
+		}
+	}
 }
 
 func runWorkspaceQueryIndexClean(workspace string, args []string) error {
@@ -127,33 +179,50 @@ func writeWorkspaceQueryIndexStatus(status controlplane.WorkspaceQueryIndexStatu
 	}
 	fmt.Fprintln(os.Stdout, "Query index")
 	fmt.Fprintln(os.Stdout)
-	fmt.Fprintf(os.Stdout, "workspace   %s\n", status.Workspace)
+	writeWorkspaceQueryIndexField("workspace", status.Workspace)
 	if status.Path != "" {
-		fmt.Fprintf(os.Stdout, "path        %s\n", status.Path)
+		writeWorkspaceQueryIndexField("path", status.Path)
 	}
-	fmt.Fprintf(os.Stdout, "state       %s\n", status.State)
-	fmt.Fprintf(os.Stdout, "backend     keyword bm25\n")
-	fmt.Fprintf(os.Stdout, "redissearch %t\n", status.Keyword.SearchAvailable)
-	fmt.Fprintf(os.Stdout, "files       %d\n", status.Keyword.Files)
-	fmt.Fprintf(os.Stdout, "ready       %d\n", status.Keyword.Ready)
-	fmt.Fprintf(os.Stdout, "pending     %d\n", status.Keyword.Pending)
-	fmt.Fprintf(os.Stdout, "stale       %d\n", status.Keyword.Stale)
-	fmt.Fprintf(os.Stdout, "unindexed   %d\n", status.Keyword.Unindexed)
-	fmt.Fprintf(os.Stdout, "skipped     %d\n", status.Keyword.Skipped)
-	fmt.Fprintf(os.Stdout, "errors      %d\n", status.Keyword.Errors)
-	fmt.Fprintf(os.Stdout, "chunks      %d\n", status.Keyword.Chunks)
-	fmt.Fprintf(os.Stdout, "embeddings  %t\n", status.EmbeddingsEnabled)
-	if status.Model != "" {
-		fmt.Fprintf(os.Stdout, "model       %s\n", status.Model)
+	writeWorkspaceQueryIndexField("state", status.State)
+	writeWorkspaceQueryIndexField("backend", "keyword bm25")
+	writeWorkspaceQueryIndexField("redissearch", fmt.Sprintf("%t", status.Keyword.SearchAvailable))
+	writeWorkspaceQueryIndexField("files", fmt.Sprintf("%d", status.Keyword.Files))
+	writeWorkspaceQueryIndexField("ready", fmt.Sprintf("%d", status.Keyword.Ready))
+	writeWorkspaceQueryIndexField("pending", fmt.Sprintf("%d", status.Keyword.Pending))
+	writeWorkspaceQueryIndexField("stale", fmt.Sprintf("%d", status.Keyword.Stale))
+	writeWorkspaceQueryIndexField("unindexed", fmt.Sprintf("%d", status.Keyword.Unindexed))
+	writeWorkspaceQueryIndexField("skipped", fmt.Sprintf("%d", status.Keyword.Skipped))
+	writeWorkspaceQueryIndexField("errors", fmt.Sprintf("%d", status.Keyword.Errors))
+	writeWorkspaceQueryIndexField("chunks", fmt.Sprintf("%d", status.Keyword.Chunks))
+	writeWorkspaceQueryIndexField("embeddings", "global "+embeddingStatusLabel(status.Embeddings))
+	if status.Embeddings.Provider != "" {
+		writeWorkspaceQueryIndexField("embedding_provider", status.Embeddings.Provider)
 	}
-	if status.ChunkStrategy != "" {
-		fmt.Fprintf(os.Stdout, "strategy    %s\n", status.ChunkStrategy)
+	if status.Embeddings.Model != "" {
+		writeWorkspaceQueryIndexField("embedding_model", status.Embeddings.Model)
+	}
+	if status.Embeddings.Message != "" && !status.Embeddings.Available {
+		writeWorkspaceQueryIndexField("embedding_message", status.Embeddings.Message)
 	}
 	if status.Message != "" {
 		fmt.Fprintln(os.Stdout)
 		fmt.Fprintln(os.Stdout, status.Message)
 	}
 	return nil
+}
+
+func writeWorkspaceQueryIndexField(label, value string) {
+	fmt.Fprintf(os.Stdout, "%-18s %s\n", label, value)
+}
+
+func embeddingStatusLabel(status controlplane.QueryEmbeddingStatus) string {
+	if status.Available {
+		return "ready"
+	}
+	if status.Enabled {
+		return "unavailable"
+	}
+	return "off"
 }
 
 func writeWorkspaceQueryIndexRebuild(response controlplane.WorkspaceQueryIndexRebuildResponse, jsonOut bool) error {
@@ -176,6 +245,14 @@ func writeWorkspaceQueryIndexRebuild(response controlplane.WorkspaceQueryIndexRe
 		fmt.Fprintf(os.Stdout, "skipped    %d\n", response.Keyword.Process.Skipped)
 		fmt.Fprintf(os.Stdout, "pending    %d\n", response.Keyword.Process.Pending)
 	}
+	if response.Embeddings != nil {
+		fmt.Fprintf(os.Stdout, "embeddings %s\n", embeddingBackfillLabel(*response.Embeddings))
+		fmt.Fprintf(os.Stdout, "embedded   %d\n", response.Embeddings.Embedded)
+		fmt.Fprintf(os.Stdout, "scanned    %d\n", response.Embeddings.Scanned)
+		if response.Embeddings.Message != "" {
+			fmt.Fprintf(os.Stdout, "embedding_message %s\n", response.Embeddings.Message)
+		}
+	}
 	fmt.Fprintf(os.Stdout, "state      %s\n", response.Status.State)
 	if response.Message != "" {
 		fmt.Fprintln(os.Stdout)
@@ -184,15 +261,26 @@ func writeWorkspaceQueryIndexRebuild(response controlplane.WorkspaceQueryIndexRe
 	return nil
 }
 
+func embeddingBackfillLabel(result controlplane.QueryEmbeddingBackfillResult) string {
+	if result.Available {
+		return "ready"
+	}
+	if result.Enabled {
+		return "unavailable"
+	}
+	return "off"
+}
+
 func workspaceQueryIndexUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %[1]s query index <status|rebuild|clean> [flags]
-  %[1]s fs [workspace] query index <status|rebuild|clean> [flags]
+  %[1]s query index <status|create|rebuild|clean> [flags]
+  %[1]s fs [workspace] query index <status|create|rebuild|clean> [flags]
 
 Manage the query index for a workspace.
 
 Subcommands:
   status             Show keyword query projection and embedding state
+  create             Build keyword chunks and semantic embeddings
   rebuild            Enqueue existing files for keyword query indexing
   clean              Remove stale query index data
 
@@ -201,9 +289,11 @@ Flags:
   --path <path>      Scope status or rebuild to a workspace path
   --wait             Wait for rebuild completion
   --force            Rebuild existing chunks
+  --embeddings       Build semantic embeddings
 
 Examples:
   %[1]s query index status
+  %[1]s fs repo query index create --embeddings --wait
   %[1]s fs repo query index rebuild --path /cmd/afs --wait
 `, bin)
 }

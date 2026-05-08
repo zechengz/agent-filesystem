@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/redis/agent-filesystem/internal/queryembedding"
+	"github.com/redis/agent-filesystem/internal/queryindex"
+	"github.com/redis/agent-filesystem/internal/queryvector"
 )
 
 // ImportWorkspaceRequest uploads a client-built manifest and blob set to create
@@ -134,6 +138,7 @@ func (s *Service) importWorkspace(ctx context.Context, input ImportWorkspaceRequ
 	if err != nil {
 		return ImportWorkspaceResponse{}, err
 	}
+	s.startImportEmbeddingBackfill(workspaceID)
 	return ImportWorkspaceResponse{
 		WorkspaceID: detail.ID,
 		Workspace:   detail,
@@ -147,6 +152,27 @@ func (s *Service) importWorkspace(ctx context.Context, input ImportWorkspaceRequ
 // payload, preserving the initial checkpoint semantics used by local imports.
 func (s *Service) ImportWorkspace(ctx context.Context, input ImportWorkspaceRequest) (ImportWorkspaceResponse, error) {
 	return s.importWorkspace(ctx, input)
+}
+
+func (s *Service) startImportEmbeddingBackfill(workspaceID string) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" || s == nil || s.store == nil || s.store.rdb == nil {
+		return
+	}
+	provider, err := queryembedding.NewProviderFromEnv("")
+	if err != nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		fsKey, err := s.workspaceQueryFSKey(ctx, workspaceID)
+		if err != nil {
+			return
+		}
+		_, _ = queryindex.Rebuild(ctx, s.store.rdb, fsKey, queryindex.RebuildOptions{Path: "/", Wait: true})
+		_, _ = queryvector.Backfill(ctx, s.store.rdb, fsKey, provider, queryvector.SearchOptions{Path: "/"})
+	}()
 }
 
 // ImportWorkspace creates a workspace from a client-uploaded manifest and blob

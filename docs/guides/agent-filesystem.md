@@ -221,11 +221,18 @@ verify candidate file contents through AFS.
 
 Use `afs fs query` or `file_query` when you have a concept or natural-language
 question. Plain query is the recommended hybrid surface and currently falls
-back to keyword-ranked results when embeddings are disabled or unavailable.
-Keyword ranking uses Redis Search BM25 over query chunks when available, then
-falls back to direct content ranking. Use `query --keyword` for keyword-only
-ranking and `query --semantic` only when you specifically need vector-only
-semantic retrieval.
+back to keyword-ranked results until hybrid vector/rerank is complete. Keyword
+ranking uses Redis Search BM25 over query chunks when available, then falls
+back to direct content ranking. Use `query --keyword` for keyword-only ranking.
+Use `query --semantic` when you specifically need vector-only retrieval.
+Semantic embeddings are globally enabled and currently use OpenAI when
+`OPENAI_API_KEY` is present in the control-plane environment. The default model
+is `openai:text-embedding-3-small`, overrideable with `AFS_EMBED_MODEL` in that
+same environment; restart the control plane after changing it. Redis vector KNN
+is used when available, with direct vector ranking as its fallback. Semantic
+queries read existing embeddings; imports create embeddings in the background,
+and existing workspaces can be prepared with
+`afs fs <workspace> query index create --embeddings --wait`.
 
 `query --files`, `query --csv`, `query --md`, and `query --xml` provide
 QMD-style output formats for agents. `query --paths` keeps the simple path-only

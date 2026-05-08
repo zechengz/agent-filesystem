@@ -614,9 +614,14 @@ type HTTPWorkspaceQueryIndexStatus = {
   state?: string;
   message?: string;
   keyword?: HTTPWorkspaceQueryIndexKeywordStatus;
-  embeddings_enabled?: boolean;
-  model?: string;
-  chunk_strategy?: AFSWorkspaceConfig["query"]["embeddings"]["chunkStrategy"];
+  embeddings?: {
+    enabled?: boolean;
+    available?: boolean;
+    provider?: string;
+    model?: string;
+    dimension?: number;
+    message?: string;
+  };
 };
 
 type HTTPWorkspaceQueryIndexRebuildResponse = {
@@ -1930,7 +1935,6 @@ This workspace was created from the AFS Web UI.
       (sum, file) => sum + Math.max(1, Math.ceil(file.content.length / 8000)),
       0,
     );
-    const config = await demoAFSClient.getWorkspaceConfig(input);
     return {
       workspace: workspace.name,
       path: normalizedPath,
@@ -1949,9 +1953,14 @@ This workspace was created from the AFS Web UI.
         unindexed: 0,
         chunks,
       },
-      embeddingsEnabled: config.query.embeddings.enabled,
-      model: config.query.embeddings.model,
-      chunkStrategy: config.query.embeddings.chunkStrategy,
+      embeddings: {
+        enabled: true,
+        available: false,
+        provider: "openai",
+        model: "openai:text-embedding-3-small",
+        dimension: 1536,
+        message: "Semantic embeddings are unavailable. Set OPENAI_API_KEY in the control-plane environment.",
+      },
     };
   },
 
@@ -3156,15 +3165,21 @@ function mapWorkspaceQueryIndexKeywordStatus(
 function mapWorkspaceQueryIndexStatus(
   input: HTTPWorkspaceQueryIndexStatus,
 ): AFSWorkspaceQueryIndexStatus {
+  const embeddings = input.embeddings;
   return {
     workspace: input.workspace ?? "",
     path: input.path ?? "/",
     state: input.state ?? "missing",
     message: input.message ?? "",
     keyword: mapWorkspaceQueryIndexKeywordStatus(input.keyword),
-    embeddingsEnabled: input.embeddings_enabled ?? false,
-    model: input.model ?? "",
-    chunkStrategy: input.chunk_strategy || "auto",
+    embeddings: {
+      enabled: embeddings?.enabled ?? false,
+      available: embeddings?.available ?? false,
+      provider: embeddings?.provider ?? "",
+      model: embeddings?.model ?? "",
+      dimension: embeddings?.dimension ?? 0,
+      message: embeddings?.message ?? "",
+    },
   };
 }
 

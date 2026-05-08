@@ -70,34 +70,6 @@ func TestWorkspaceConfigVersioningRoundTrip(t *testing.T) {
 		t.Fatalf("get payload value = %#v, want %q", getPayload.Value, controlplane.WorkspaceVersioningModePaths)
 	}
 
-	setEmbeddingsOutput, err := captureStdout(t, func() error {
-		return cmdWorkspace([]string{"ws", "config", "repo", "set", "query.embeddings.enabled", "true", "--json"})
-	})
-	if err != nil {
-		t.Fatalf("cmdWorkspace(config set query.embeddings.enabled) returned error: %v", err)
-	}
-	var embeddingsPayload workspaceConfigJSON
-	if err := json.Unmarshal([]byte(setEmbeddingsOutput), &embeddingsPayload); err != nil {
-		t.Fatalf("Unmarshal(embeddings payload) returned error: %v\n%s", err, setEmbeddingsOutput)
-	}
-	if embeddingsPayload.Value != true {
-		t.Fatalf("embeddings payload value = %#v, want true", embeddingsPayload.Value)
-	}
-
-	setModelOutput, err := captureStdout(t, func() error {
-		return cmdWorkspace([]string{"ws", "config", "repo", "set", "query.embeddings.model", "embeddinggemma", "--json"})
-	})
-	if err != nil {
-		t.Fatalf("cmdWorkspace(config set query.embeddings.model) returned error: %v", err)
-	}
-	var modelPayload workspaceConfigJSON
-	if err := json.Unmarshal([]byte(setModelOutput), &modelPayload); err != nil {
-		t.Fatalf("Unmarshal(model payload) returned error: %v\n%s", err, setModelOutput)
-	}
-	if modelPayload.Value != "embeddinggemma" {
-		t.Fatalf("model payload value = %#v, want embeddinggemma", modelPayload.Value)
-	}
-
 	listOutput, err := captureStdout(t, func() error {
 		return cmdWorkspace([]string{"ws", "config", "repo", "list", "--json"})
 	})
@@ -111,11 +83,8 @@ func TestWorkspaceConfigVersioningRoundTrip(t *testing.T) {
 	if listPayload.Values["versioning.mode"] != controlplane.WorkspaceVersioningModePaths {
 		t.Fatalf("list versioning.mode = %#v, want %q", listPayload.Values["versioning.mode"], controlplane.WorkspaceVersioningModePaths)
 	}
-	if listPayload.Values["query.embeddings.enabled"] != true {
-		t.Fatalf("list query.embeddings.enabled = %#v, want true", listPayload.Values["query.embeddings.enabled"])
-	}
-	if listPayload.Values["query.embeddings.model"] != "embeddinggemma" {
-		t.Fatalf("list query.embeddings.model = %#v, want embeddinggemma", listPayload.Values["query.embeddings.model"])
+	if _, ok := listPayload.Values["query.embeddings.model"]; ok {
+		t.Fatalf("list includes query.embeddings.model, want embedding model to be global")
 	}
 
 	unsetOutput, err := captureStdout(t, func() error {
@@ -132,18 +101,8 @@ func TestWorkspaceConfigVersioningRoundTrip(t *testing.T) {
 		t.Fatalf("unset payload value = %#v, want %q", unsetPayload.Value, controlplane.WorkspaceVersioningModeOff)
 	}
 
-	unsetEmbeddingsOutput, err := captureStdout(t, func() error {
-		return cmdWorkspace([]string{"ws", "config", "repo", "unset", "query.embeddings.enabled", "--json"})
-	})
-	if err != nil {
-		t.Fatalf("cmdWorkspace(config unset query.embeddings.enabled) returned error: %v", err)
-	}
-	var unsetEmbeddingsPayload workspaceConfigJSON
-	if err := json.Unmarshal([]byte(unsetEmbeddingsOutput), &unsetEmbeddingsPayload); err != nil {
-		t.Fatalf("Unmarshal(unset embeddings payload) returned error: %v\n%s", err, unsetEmbeddingsOutput)
-	}
-	if unsetEmbeddingsPayload.Value != false {
-		t.Fatalf("unset embeddings payload value = %#v, want false", unsetEmbeddingsPayload.Value)
+	if err := cmdWorkspace([]string{"ws", "config", "repo", "set", "query.embeddings.model", "embeddinggemma"}); err == nil {
+		t.Fatal("cmdWorkspace(config set query.embeddings.model) returned nil, want global model guidance")
 	}
 }
 

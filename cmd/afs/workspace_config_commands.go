@@ -236,9 +236,6 @@ func workspaceConfigKeys() []string {
 		"versioning.maxAgeDays",
 		"versioning.maxTotalBytes",
 		"versioning.largeFileCutoffBytes",
-		"query.embeddings.enabled",
-		"query.embeddings.model",
-		"query.embeddings.chunkStrategy",
 	}
 }
 
@@ -252,9 +249,6 @@ func workspaceConfigValues(cfg controlplane.WorkspaceConfig) map[string]any {
 		"versioning.maxAgeDays":           normalized.Versioning.MaxAgeDays,
 		"versioning.maxTotalBytes":        normalized.Versioning.MaxTotalBytes,
 		"versioning.largeFileCutoffBytes": normalized.Versioning.LargeFileCutoffBytes,
-		"query.embeddings.enabled":        normalized.Query.Embeddings.Enabled,
-		"query.embeddings.model":          normalized.Query.Embeddings.Model,
-		"query.embeddings.chunkStrategy":  normalized.Query.Embeddings.ChunkStrategy,
 	}
 	return values
 }
@@ -302,16 +296,6 @@ func setWorkspaceConfigValue(cfg controlplane.WorkspaceConfig, key, rawValue str
 			return controlplane.WorkspaceConfig{}, err
 		}
 		next.Versioning.LargeFileCutoffBytes = n
-	case "query.embeddings.enabled":
-		enabled, err := parseWorkspaceConfigBool(key, value)
-		if err != nil {
-			return controlplane.WorkspaceConfig{}, err
-		}
-		next.Query.Embeddings.Enabled = enabled
-	case "query.embeddings.model":
-		next.Query.Embeddings.Model = value
-	case "query.embeddings.chunkStrategy":
-		next.Query.Embeddings.ChunkStrategy = value
 	default:
 		return controlplane.WorkspaceConfig{}, fmt.Errorf("unknown workspace config key %q", key)
 	}
@@ -339,12 +323,6 @@ func unsetWorkspaceConfigValue(cfg controlplane.WorkspaceConfig, key string) (co
 		next.Versioning.MaxTotalBytes = 0
 	case "versioning.largeFileCutoffBytes":
 		next.Versioning.LargeFileCutoffBytes = 0
-	case "query.embeddings.enabled":
-		next.Query.Embeddings.Enabled = false
-	case "query.embeddings.model":
-		next.Query.Embeddings.Model = ""
-	case "query.embeddings.chunkStrategy":
-		next.Query.Embeddings.ChunkStrategy = ""
 	default:
 		return controlplane.WorkspaceConfig{}, fmt.Errorf("unknown workspace config key %q", key)
 	}
@@ -373,12 +351,6 @@ func normalizeWorkspaceConfigKey(key string) string {
 		return "versioning.maxTotalBytes"
 	case "versioning.largefilecutoffbytes", "versioning.largefilecutoff":
 		return "versioning.largeFileCutoffBytes"
-	case "query.embeddings.enabled", "query.embeddingsenabled", "query.embedding.enabled", "query.embeddingenabled":
-		return "query.embeddings.enabled"
-	case "query.embeddings.model", "query.embeddingsmodel", "query.embedding.model", "query.embeddingmodel":
-		return "query.embeddings.model"
-	case "query.embeddings.chunkstrategy", "query.embeddingschunkstrategy", "query.embedding.chunkstrategy", "query.embeddingchunkstrategy":
-		return "query.embeddings.chunkStrategy"
 	default:
 		return strings.TrimSpace(key)
 	}
@@ -482,17 +454,13 @@ Common keys:
   versioning.maxAgeDays
   versioning.maxTotalBytes
   versioning.largeFileCutoffBytes
-  query.embeddings.enabled
-  query.embeddings.model
-  query.embeddings.chunkStrategy
 
 Examples:
   %s ws config repo get versioning.mode
   %s ws config repo set versioning.mode all
   %s ws config repo set versioning.includeGlobs 'src/**,docs/**'
-  %s ws config repo set query.embeddings.enabled true
   %s ws config repo unset versioning.maxAgeDays --json
-`, bin, bin, bin, bin, bin, bin)
+`, bin, bin, bin, bin, bin)
 }
 
 func workspaceConfigGetUsageText(bin string) string {

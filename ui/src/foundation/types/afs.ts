@@ -226,15 +226,22 @@ export type AFSWorkspaceQueryIndexKeywordStatus = {
   chunks: number;
 };
 
+export type AFSWorkspaceQueryEmbeddingStatus = {
+  enabled: boolean;
+  available: boolean;
+  provider: string;
+  model: string;
+  dimension: number;
+  message: string;
+};
+
 export type AFSWorkspaceQueryIndexStatus = {
   workspace: string;
   path: string;
   state: AFSWorkspaceQueryIndexState | string;
   message: string;
   keyword: AFSWorkspaceQueryIndexKeywordStatus;
-  embeddingsEnabled: boolean;
-  model: string;
-  chunkStrategy: AFSWorkspaceQueryChunkStrategy;
+  embeddings: AFSWorkspaceQueryEmbeddingStatus;
 };
 
 export type AFSWorkspaceQueryIndexRebuildResponse = {

@@ -32,6 +32,12 @@ type workspaceConfigRecord struct {
 func DefaultWorkspaceConfig() WorkspaceConfig {
 	return WorkspaceConfig{
 		Versioning: DefaultWorkspaceVersioningPolicy(),
+		Query: WorkspaceQueryConfig{
+			Embeddings: WorkspaceQueryEmbeddingsConfig{
+				Enabled:       true,
+				ChunkStrategy: WorkspaceQueryChunkStrategyAuto,
+			},
+		},
 	}
 }
 

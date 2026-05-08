@@ -80,19 +80,8 @@ func runWorkspaceQuery(mode, workspace string, args []string) error {
 	}
 	defer remote.close()
 
-	cfg, err := workspaceQueryConfig(ctx, remote.controlPlane, remote.selection)
-	if err != nil {
-		return err
-	}
 	request := workspaceQueryRequest(remote.selection, opts)
-	if opts.mode == mcptools.FileQueryModeKeyword || opts.mode == mcptools.FileQueryModeHybrid {
-		return runWorkspaceKeywordQuery(ctx, remote, opts, request, cfg)
-	}
-	message := workspaceQueryUnavailableMessage(opts, remote.selection.Name, cfg)
-	if opts.jsonOut {
-		return encodeWorkspaceQueryUnavailable(request, message)
-	}
-	return errors.New(message)
+	return runWorkspaceQueryRequest(ctx, remote, opts, request)
 }
 
 func isWorkspaceQueryIndexInvocation(args []string) bool {
@@ -103,7 +92,7 @@ func isWorkspaceQueryIndexInvocation(args []string) bool {
 		return true
 	}
 	switch strings.TrimSpace(args[1]) {
-	case "status", "rebuild", "clean":
+	case "status", "create", "rebuild", "clean":
 		return true
 	default:
 		return false
@@ -293,41 +282,12 @@ func workspaceQueryRequest(selection workspaceSelection, opts workspaceQueryOpti
 	return request
 }
 
-func runWorkspaceKeywordQuery(ctx context.Context, remote *fsRemoteWorkspace, opts workspaceQueryOptions, request mcptools.FileQueryRequest, cfg controlplane.WorkspaceConfig) error {
+func runWorkspaceQueryRequest(ctx context.Context, remote *fsRemoteWorkspace, opts workspaceQueryOptions, request mcptools.FileQueryRequest) error {
 	response, err := remote.controlPlane.QueryWorkspace(ctx, remote.selection.ID, request)
 	if err != nil {
 		return err
 	}
-	if !opts.jsonOut && opts.mode == mcptools.FileQueryModeHybrid && !cfg.Query.Embeddings.Enabled && !workspaceQueryHasSemanticClauses(request.Searches) {
-		fmt.Fprintln(os.Stderr, "Warning: Embeddings disabled; using keyword retrieval.")
-	}
 	return writeWorkspaceQueryResponse(response, opts)
-}
-
-func workspaceQueryHasSemanticClauses(searches []mcptools.FileQuerySearch) bool {
-	for _, search := range searches {
-		switch search.Type {
-		case mcptools.FileQuerySearchVec, mcptools.FileQuerySearchHyde:
-			return true
-		}
-	}
-	return false
-}
-
-func encodeWorkspaceQueryUnavailable(request mcptools.FileQueryRequest, message string) error {
-	response := mcptools.FileQueryResponse{
-		Status:    mcptools.FileQueryStatusUnavailable,
-		Workspace: request.Workspace,
-		Path:      request.Path,
-		Query:     request.Query,
-		Searches:  request.Searches,
-		Intent:    request.Intent,
-		Results:   []mcptools.FileQueryResult{},
-		Warnings:  []string{message},
-	}
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(response)
 }
 
 func writeWorkspaceQueryResponse(response mcptools.FileQueryResponse, opts workspaceQueryOptions) error {
@@ -335,6 +295,16 @@ func writeWorkspaceQueryResponse(response mcptools.FileQueryResponse, opts works
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(response)
+	}
+	if response.Status == mcptools.FileQueryStatusUnavailable {
+		message := "query is unavailable"
+		for _, warning := range response.Warnings {
+			if strings.TrimSpace(warning) != "" {
+				message = strings.TrimSpace(warning)
+				break
+			}
+		}
+		return errors.New(message)
 	}
 	for _, warning := range response.Warnings {
 		if strings.TrimSpace(warning) != "" {
@@ -403,11 +373,28 @@ func writeWorkspaceQueryResponse(response mcptools.FileQueryResponse, opts works
 }
 
 func writeWorkspaceQueryFiles(response mcptools.FileQueryResponse, results []mcptools.FileQueryResult) error {
-	for _, result := range results {
+	for _, result := range workspaceQueryFileResults(results) {
 		docID := workspaceQueryResultDocID(result)
-		fmt.Fprintf(os.Stdout, "#%s,%s,%s\n", docID, workspaceQueryScoreNumber(result.Score), workspaceQueryResultURI(response.Workspace, result))
+		fmt.Fprintf(os.Stdout, "#%s,%s,%s\n", docID, workspaceQueryScoreNumber(result.Score), workspaceQueryResultFileURI(response.Workspace, result))
 	}
 	return nil
+}
+
+func workspaceQueryFileResults(results []mcptools.FileQueryResult) []mcptools.FileQueryResult {
+	out := make([]mcptools.FileQueryResult, 0, len(results))
+	positions := make(map[string]int, len(results))
+	for _, result := range results {
+		pathKey := normalizeFSRemotePath(result.Path)
+		if index, ok := positions[pathKey]; ok {
+			if result.Score > out[index].Score {
+				out[index] = result
+			}
+			continue
+		}
+		positions[pathKey] = len(out)
+		out = append(out, result)
+	}
+	return out
 }
 
 func writeWorkspaceQueryCSV(response mcptools.FileQueryResponse, results []mcptools.FileQueryResult, opts workspaceQueryOptions) error {
@@ -611,12 +598,7 @@ func workspaceQueryResultSource(result mcptools.FileQueryResult) string {
 }
 
 func workspaceQueryResultURI(workspace string, result mcptools.FileQueryResult) string {
-	workspace = strings.Trim(strings.TrimSpace(workspace), "/")
-	if workspace == "" {
-		workspace = "workspace"
-	}
-	remotePath := normalizeFSRemotePath(result.Path)
-	uri := "afs://" + workspace + remotePath
+	uri := workspaceQueryResultFileURI(workspace, result)
 	if result.StartLine > 0 {
 		if result.EndLine > result.StartLine {
 			uri += fmt.Sprintf(":%d-%d", result.StartLine, result.EndLine)
@@ -624,6 +606,16 @@ func workspaceQueryResultURI(workspace string, result mcptools.FileQueryResult) 
 			uri += fmt.Sprintf(":%d", result.StartLine)
 		}
 	}
+	return uri
+}
+
+func workspaceQueryResultFileURI(workspace string, result mcptools.FileQueryResult) string {
+	workspace = strings.Trim(strings.TrimSpace(workspace), "/")
+	if workspace == "" {
+		workspace = "workspace"
+	}
+	remotePath := normalizeFSRemotePath(result.Path)
+	uri := "afs://" + workspace + remotePath
 	return uri
 }
 
@@ -726,23 +718,6 @@ func workspaceQueryMetadataInt(metadata map[string]any, key string) (int, bool) 
 	}
 }
 
-func workspaceQueryUnavailableMessage(opts workspaceQueryOptions, workspace string, cfg controlplane.WorkspaceConfig) string {
-	switch opts.mode {
-	case mcptools.FileQueryModeKeyword:
-		return fmt.Sprintf("keyword query is not ready yet for workspace %q\nIt will use BM25 ranking through RedisSearch. Until then, use '%s grep <pattern>' for exact line matches.", workspace, filepath.Base(os.Args[0]))
-	case mcptools.FileQueryModeSemantic:
-		if !cfg.Query.Embeddings.Enabled {
-			return fmt.Sprintf("semantic query is disabled for workspace %q\nEnable it with: %s ws config %s set query.embeddings.enabled true", workspace, filepath.Base(os.Args[0]), workspace)
-		}
-		return fmt.Sprintf("semantic query is not ready yet for workspace %q\nThe vector backend will land in the next retrieval slice.", workspace)
-	default:
-		if !cfg.Query.Embeddings.Enabled {
-			return fmt.Sprintf("workspace query is not ready yet for workspace %q\nPlain query will use hybrid ranking and fall back to BM25 keywords when embeddings are disabled.\nUntil then, use '%s grep <pattern>' for exact line matches. Use '%s query --semantic <query>' when you specifically want vector-only search.", workspace, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
-		}
-		return fmt.Sprintf("workspace query is not ready yet for workspace %q\nThe QMD-style hybrid query backend will land in the next retrieval slice.", workspace)
-	}
-}
-
 func workspaceQueryIsExplicitExpand(query string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(query)), "expand:")
 }
@@ -757,7 +732,10 @@ QMD-style hybrid + rerank workspace query.
 Plain text runs hybrid retrieval by default. Use --keyword for keyword-ranked
 retrieval only, or --semantic for vector-only semantic search.
 
-If embeddings are disabled, default query falls back to keyword ranked results.
+Default query currently falls back to keyword ranked results until hybrid
+vector/rerank is complete. Use --semantic for vector-only retrieval. Semantic
+embeddings are globally enabled and use OpenAI when OPENAI_API_KEY is set in
+the control-plane environment.
 Use grep when you know the exact text.
 
 Typed query documents:

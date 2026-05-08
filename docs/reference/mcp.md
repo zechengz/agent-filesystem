@@ -303,10 +303,17 @@ Arguments:
 
 Use `file_query` when exact text is unknown or typed `lex:`, `vec:`, and
 `hyde:` clauses help describe the task. Plain `mode=query` falls back to
-keyword-ranked results when embeddings are disabled or unavailable. Keyword
-ranking uses Redis Search BM25 over query chunks when available, then falls
-back to direct content ranking. Use `mode=semantic` only when vector-only
-retrieval is required.
+keyword-ranked results until hybrid vector/rerank is complete. Keyword ranking
+uses Redis Search BM25 over query chunks when available, then falls back to
+direct content ranking. Use `mode=semantic` only when vector-only retrieval is
+required. Semantic embeddings are globally enabled and currently use OpenAI
+when `OPENAI_API_KEY` is present in the control-plane environment. The default
+model is `openai:text-embedding-3-small`, overrideable with `AFS_EMBED_MODEL`
+in that same environment; restart the control plane after changing it. Redis
+vector KNN is used when available, with direct vector ranking as its fallback.
+Semantic queries read existing embeddings; imports create embeddings in the
+background, and existing workspaces should be prepared through the query index
+creation flow before relying on `mode=semantic`.
 
 ## File Write Tools
 

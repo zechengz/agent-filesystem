@@ -3,12 +3,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/internal/mcptools"
+	"github.com/redis/agent-filesystem/internal/queryembedding"
+	"github.com/redis/agent-filesystem/internal/queryindex"
+	"github.com/redis/agent-filesystem/internal/queryvector"
 )
 
 func TestParseWorkspaceQueryArgsTypedDocument(t *testing.T) {
@@ -102,6 +107,23 @@ func TestParseWorkspaceQueryArgsKeywordSemanticModes(t *testing.T) {
 	}
 }
 
+func TestWorkspaceQueryIndexInvocationIncludesCreate(t *testing.T) {
+	for _, args := range [][]string{
+		{"index"},
+		{"index", "status"},
+		{"index", "create"},
+		{"index", "rebuild"},
+		{"index", "clean"},
+	} {
+		if !isWorkspaceQueryIndexInvocation(args) {
+			t.Fatalf("isWorkspaceQueryIndexInvocation(%#v) = false, want true", args)
+		}
+	}
+	if isWorkspaceQueryIndexInvocation([]string{"index", "files"}) {
+		t.Fatal("isWorkspaceQueryIndexInvocation(index files) = true, want natural query")
+	}
+}
+
 func TestParseWorkspaceQueryArgsRejectsModeFlagsWithTypedDocuments(t *testing.T) {
 	_, err := parseWorkspaceQueryArgs(mcptools.FileQueryModeHybrid, []string{
 		"--semantic",
@@ -129,19 +151,84 @@ func TestParseWorkspaceQueryArgsRejectsKeywordAndSemanticTogether(t *testing.T) 
 	}
 }
 
-func TestCmdQuerySemanticReportsEmbeddingsDisabled(t *testing.T) {
+func TestCmdQuerySemanticMissingKeyFailsClearly(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
 	_, _, closeStore := setupAFSGrepTest(t)
 	defer closeStore()
 
-	err := cmdQuery([]string{"query", "--semantic", "semantic mount setup"})
+	_, err := captureStdout(t, func() error {
+		return cmdQuery([]string{"query", "--semantic", "semantic mount setup"})
+	})
 	if err == nil {
-		t.Fatal("cmdQuery(--semantic) returned nil, want unavailable error")
+		t.Fatal("cmdQuery(--semantic) returned nil error, want unavailable")
 	}
-	if !strings.Contains(err.Error(), "semantic query is disabled") {
-		t.Fatalf("error = %q, want disabled message", err)
+	if !strings.Contains(err.Error(), "OPENAI_API_KEY") {
+		t.Fatalf("error = %q, want OPENAI_API_KEY guidance", err)
 	}
-	if !strings.Contains(err.Error(), "query.embeddings.enabled true") {
-		t.Fatalf("error = %q, want enable command", err)
+}
+
+func TestCmdQuerySemanticReturnsVectorResultsWhenEnabled(t *testing.T) {
+	_, store, closeStore := setupAFSGrepTest(t)
+	defer closeStore()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode(request) returned error: %v", err)
+		}
+		data := make([]map[string]any, 0, len(request.Input))
+		for i, text := range request.Input {
+			vector := []float32{0, 1, 0}
+			if strings.Contains(strings.ToLower(text), "snapshot") || strings.Contains(strings.ToLower(text), "checkpoint") {
+				vector = []float32{1, 0, 0}
+			}
+			data = append(data, map[string]any{"index": i, "embedding": vector})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer server.Close()
+	t.Setenv("AFS_EMBED_PROVIDER", "openai")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_BASE_URL", server.URL)
+	t.Setenv("AFS_EMBED_DIMENSIONS", "3")
+
+	writeLiveAFSFile(t, store, "repo", "/docs/checkpoints.md", "Checkpoint savepoint recovery guide.\nUse snapshots to restore workspace state.\n")
+	writeLiveAFSFile(t, store, "repo", "/notes/auth.md", "Auth attaches tenant scope to bearer tokens.\n")
+	fsKey, _, _, err := controlplane.EnsureWorkspaceRoot(context.Background(), store.cp, "repo")
+	if err != nil {
+		t.Fatalf("EnsureWorkspaceRoot() returned error: %v", err)
+	}
+	provider, err := queryembedding.NewProviderFromEnv("")
+	if err != nil {
+		t.Fatalf("NewProviderFromEnv() returned error: %v", err)
+	}
+	if _, err := queryvector.Backfill(context.Background(), store.rdb, fsKey, provider, queryvector.SearchOptions{Path: "/docs"}); err != nil {
+		t.Fatalf("Backfill() returned error: %v", err)
+	}
+
+	output, err := captureStdout(t, func() error {
+		return cmdQuery([]string{"query", "--semantic", "--json", "--path", "docs", "how do I save a snapshot?"})
+	})
+	if err != nil {
+		t.Fatalf("cmdQuery(--semantic) returned error: %v", err)
+	}
+
+	var response mcptools.FileQueryResponse
+	if err := json.Unmarshal([]byte(output), &response); err != nil {
+		t.Fatalf("Unmarshal(response) returned error: %v\n%s", err, output)
+	}
+	if response.Status != mcptools.FileQueryStatusOK {
+		t.Fatalf("status = %q, want ok", response.Status)
+	}
+	if len(response.Results) != 1 || response.Results[0].Path != "/docs/checkpoints.md" {
+		t.Fatalf("results = %#v, want semantic checkpoints result scoped to docs", response.Results)
+	}
+	if len(response.Results[0].SearchTypes) != 1 || response.Results[0].SearchTypes[0] != mcptools.FileQuerySearchVec {
+		t.Fatalf("search types = %#v, want vector evidence", response.Results[0].SearchTypes)
+	}
+	if response.Results[0].Metadata["model"] == "" {
+		t.Fatalf("metadata = %#v, want embedding model", response.Results[0].Metadata)
 	}
 }
 
@@ -358,8 +445,8 @@ func TestWriteWorkspaceQueryResponseStructuredFormats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeWorkspaceQueryResponse(files) returned error: %v", err)
 	}
-	if !strings.Contains(filesOutput, "#") || !strings.Contains(filesOutput, ",0.75,afs://repo/docs/checkpoints.md:3") {
-		t.Fatalf("files output = %q, want QMD-style id,score,uri", filesOutput)
+	if !strings.Contains(filesOutput, "#") || !strings.Contains(filesOutput, ",0.75,afs://repo/docs/checkpoints.md\n") {
+		t.Fatalf("files output = %q, want QMD-style id,score,file uri", filesOutput)
 	}
 
 	pathsOutput, err := captureStdout(t, func() error {
@@ -396,6 +483,53 @@ func TestWriteWorkspaceQueryResponseStructuredFormats(t *testing.T) {
 	}
 }
 
+func TestWriteWorkspaceQueryFilesDeduplicatesChunksByFile(t *testing.T) {
+	response := mcptools.FileQueryResponse{
+		Status:    mcptools.FileQueryStatusOK,
+		Workspace: "repo",
+		Results: []mcptools.FileQueryResult{
+			{
+				Path:      "/ui/search.tsx",
+				StartLine: 10,
+				EndLine:   17,
+				Score:     0.40,
+				Snippet:   "first search chunk",
+			},
+			{
+				Path:      "/ui/search.tsx",
+				StartLine: 200,
+				EndLine:   207,
+				Score:     0.43,
+				Snippet:   "better search chunk",
+			},
+			{
+				Path:      "/docs/query.md",
+				StartLine: 1,
+				EndLine:   8,
+				Score:     0.41,
+				Snippet:   "query docs",
+			},
+		},
+	}
+
+	output, err := captureStdout(t, func() error {
+		return writeWorkspaceQueryResponse(response, workspaceQueryOptions{filesOnly: true})
+	})
+	if err != nil {
+		t.Fatalf("writeWorkspaceQueryResponse(files) returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("output = %q, want one line per file", output)
+	}
+	if !strings.Contains(lines[0], ",0.43,afs://repo/ui/search.tsx") || strings.Contains(lines[0], ":200") {
+		t.Fatalf("first line = %q, want best file-level candidate without line suffix", lines[0])
+	}
+	if !strings.Contains(lines[1], ",0.41,afs://repo/docs/query.md") || strings.Contains(lines[1], ":1") {
+		t.Fatalf("second line = %q, want file-level candidate without line suffix", lines[1])
+	}
+}
+
 func TestCmdQuerySemanticClausesMentionEmbeddingsWithoutMakingQueryVectorOnly(t *testing.T) {
 	_, store, closeStore := setupAFSGrepTest(t)
 	defer closeStore()
@@ -419,26 +553,70 @@ func TestCmdQuerySemanticClausesMentionEmbeddingsWithoutMakingQueryVectorOnly(t 
 		t.Fatalf("results = %#v, want checkpoints result", response.Results)
 	}
 	if len(response.Warnings) != 1 ||
-		!strings.Contains(response.Warnings[0], "Embeddings are disabled") ||
-		!strings.Contains(response.Warnings[0], "vec:/hyde: clauses were used as keyword text") {
+		!strings.Contains(response.Warnings[0], "semantic clauses were keyword-ranked") {
 		t.Fatalf("warnings = %#v, want semantic-clause fallback warning", response.Warnings)
 	}
 }
 
 func TestCmdFSQuerySemanticRoutesExplicitWorkspace(t *testing.T) {
-	_, _, closeStore := setupAFSGrepTest(t)
+	_, store, closeStore := setupAFSGrepTest(t)
 	defer closeStore()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("Decode(request) returned error: %v", err)
+		}
+		data := make([]map[string]any, 0, len(request.Input))
+		for i, text := range request.Input {
+			vector := []float32{0, 1, 0}
+			if strings.Contains(strings.ToLower(text), "mount") || strings.Contains(strings.ToLower(text), "setup") {
+				vector = []float32{1, 0, 0}
+			}
+			data = append(data, map[string]any{"index": i, "embedding": vector})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer server.Close()
+	t.Setenv("AFS_EMBED_PROVIDER", "openai")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_BASE_URL", server.URL)
+	t.Setenv("AFS_EMBED_DIMENSIONS", "3")
 
-	err := cmdFS([]string{"fs", "repo", "query", "--semantic", "semantic mount setup"})
-	if err == nil {
-		t.Fatal("cmdFS(query --semantic) returned nil, want unavailable error")
+	writeLiveAFSFile(t, store, "repo", "/docs/mount.md", "Semantic mount setup guide.\n")
+
+	createOutput, err := captureStdout(t, func() error {
+		return cmdFS([]string{"fs", "repo", "query", "index", "create", "--embeddings", "--wait", "--json"})
+	})
+	if err != nil {
+		t.Fatalf("cmdFS(query index create) returned error: %v", err)
 	}
-	if !strings.Contains(err.Error(), `workspace "repo"`) {
-		t.Fatalf("error = %q, want explicit workspace", err)
+	var createResponse controlplane.WorkspaceQueryIndexRebuildResponse
+	if err := json.Unmarshal([]byte(createOutput), &createResponse); err != nil {
+		t.Fatalf("Unmarshal(create response) returned error: %v\n%s", err, createOutput)
+	}
+	if createResponse.Embeddings == nil || createResponse.Embeddings.Embedded == 0 {
+		t.Fatalf("create response = %+v, want embedded chunks", createResponse)
+	}
+
+	output, err := captureStdout(t, func() error {
+		return cmdFS([]string{"fs", "repo", "query", "--semantic", "--json", "semantic mount setup"})
+	})
+	if err != nil {
+		t.Fatalf("cmdFS(query --semantic) returned error: %v", err)
+	}
+	var response mcptools.FileQueryResponse
+	if err := json.Unmarshal([]byte(output), &response); err != nil {
+		t.Fatalf("Unmarshal(response) returned error: %v\n%s", err, output)
+	}
+	if response.Status != mcptools.FileQueryStatusOK || len(response.Results) == 0 || response.Results[0].Path != "/docs/mount.md" {
+		t.Fatalf("response = %+v, want explicit workspace semantic result", response)
 	}
 }
 
-func TestCmdQueryIndexStatusReportsWorkspaceConfig(t *testing.T) {
+func TestCmdQueryIndexStatusReportsGlobalEmbeddingStatus(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
 	_, _, closeStore := setupAFSGrepTest(t)
 	defer closeStore()
 
@@ -453,9 +631,75 @@ func TestCmdQueryIndexStatusReportsWorkspaceConfig(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &status); err != nil {
 		t.Fatalf("Unmarshal(status) returned error: %v\n%s", err, output)
 	}
-	if status.Workspace != "repo" || status.Keyword.Files != 0 || status.EmbeddingsEnabled {
-		t.Fatalf("status = %+v, want empty repo keyword status with embeddings disabled", status)
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(output), &raw); err != nil {
+		t.Fatalf("Unmarshal(raw status) returned error: %v", err)
 	}
+	for _, staleKey := range []string{"embeddings_enabled", "model", "chunk_strategy"} {
+		if _, ok := raw[staleKey]; ok {
+			t.Fatalf("status contains top-level %q: %s", staleKey, output)
+		}
+	}
+	if status.Workspace != "repo" || status.Keyword.Files != 0 {
+		t.Fatalf("status = %+v, want empty repo keyword status", status)
+	}
+	if !status.Embeddings.Enabled || status.Embeddings.Model != "openai:text-embedding-3-small" || status.Embeddings.Available {
+		t.Fatalf("embedding status = %+v, want global OpenAI unavailable without key", status)
+	}
+}
+
+func TestWriteWorkspaceQueryIndexStatusAlignsLongEmbeddingLabels(t *testing.T) {
+	status := controlplane.WorkspaceQueryIndexStatus{
+		Workspace: "first-workspace",
+		Path:      "/",
+		State:     queryindex.StateReady,
+		Keyword: queryindex.Status{
+			SearchAvailable: true,
+			Files:           13,
+			Ready:           11,
+			Skipped:         2,
+			Chunks:          48,
+		},
+		Embeddings: controlplane.QueryEmbeddingStatus{
+			Enabled:   true,
+			Available: true,
+			Provider:  "openai",
+			Model:     "openai:text-embedding-3-small",
+		},
+	}
+
+	output, err := captureStdout(t, func() error {
+		return writeWorkspaceQueryIndexStatus(status, false)
+	})
+	if err != nil {
+		t.Fatalf("writeWorkspaceQueryIndexStatus() returned error: %v", err)
+	}
+	for _, tc := range []struct {
+		label string
+		value string
+	}{
+		{label: "workspace", value: "first-workspace"},
+		{label: "embeddings", value: "global ready"},
+		{label: "embedding_provider", value: "openai"},
+		{label: "embedding_model", value: "openai:text-embedding-3-small"},
+	} {
+		line := findLineWithPrefix(output, tc.label)
+		if line == "" {
+			t.Fatalf("output missing %q line:\n%s", tc.label, output)
+		}
+		if got, want := strings.Index(line, tc.value), 19; got != want {
+			t.Fatalf("%q value starts at column %d, want %d:\n%s", tc.label, got, want, output)
+		}
+	}
+}
+
+func findLineWithPrefix(output, prefix string) string {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return line
+		}
+	}
+	return ""
 }
 
 func TestWorkspaceQueryConfigFallsBackWhenConfigRouteIsMissing(t *testing.T) {
@@ -468,8 +712,8 @@ func TestWorkspaceQueryConfigFallsBackWhenConfigRouteIsMissing(t *testing.T) {
 	if cfg.Versioning.Mode != "off" {
 		t.Fatalf("versioning mode = %q, want off", cfg.Versioning.Mode)
 	}
-	if cfg.Query.Embeddings.Enabled {
-		t.Fatal("embeddings enabled = true, want false default")
+	if !cfg.Query.Embeddings.Enabled {
+		t.Fatal("embeddings enabled = false, want default-on legacy config")
 	}
 }
 
@@ -579,8 +823,8 @@ func TestCmdQueryContractCoversHybridFallbacksAndIndexDisambiguation(t *testing.
 				t.Fatalf("result search types = %#v, want lex/hyde fallback evidence", result.SearchTypes)
 			}
 		}
-		if len(response.Warnings) != 1 || !strings.Contains(response.Warnings[0], "Embeddings are disabled") {
-			t.Fatalf("warnings = %#v, want semantic fallback warning", response.Warnings)
+		if len(response.Warnings) != 1 || !strings.Contains(response.Warnings[0], "semantic clauses were keyword-ranked") {
+			t.Fatalf("warnings = %#v, want semantic-clause fallback warning", response.Warnings)
 		}
 		if len(response.Explain) == 0 {
 			t.Fatalf("explain = %#v, want backend explanation", response.Explain)
@@ -600,6 +844,7 @@ func TestCmdQueryContractCoversHybridFallbacksAndIndexDisambiguation(t *testing.
 	})
 
 	t.Run("semantic JSON reports unavailable without failing command", func(t *testing.T) {
+		t.Setenv("OPENAI_API_KEY", "")
 		output, err := captureStdout(t, func() error {
 			return cmdQuery([]string{"query", "--semantic", "--json", "workspace recovery"})
 		})
@@ -614,8 +859,8 @@ func TestCmdQueryContractCoversHybridFallbacksAndIndexDisambiguation(t *testing.
 		if response.Status != mcptools.FileQueryStatusUnavailable || len(response.Results) != 0 {
 			t.Fatalf("semantic response = %+v, want unavailable with empty results", response)
 		}
-		if len(response.Warnings) != 1 || !strings.Contains(response.Warnings[0], "semantic query is disabled") {
-			t.Fatalf("semantic warnings = %#v, want disabled guidance", response.Warnings)
+		if len(response.Warnings) != 1 || !strings.Contains(response.Warnings[0], "OPENAI_API_KEY") {
+			t.Fatalf("semantic warnings = %#v, want global provider guidance", response.Warnings)
 		}
 	})
 

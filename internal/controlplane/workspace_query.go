@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"github.com/redis/agent-filesystem/internal/mcptools"
+	"github.com/redis/agent-filesystem/internal/queryembedding"
 	"github.com/redis/agent-filesystem/internal/queryindex"
 	"github.com/redis/agent-filesystem/internal/querysearch"
+	"github.com/redis/agent-filesystem/internal/queryvector"
 	afsclient "github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
@@ -21,29 +23,49 @@ type WorkspaceQueryIndexStatusRequest struct {
 }
 
 type WorkspaceQueryIndexRebuildRequest struct {
-	Workspace string `json:"workspace,omitempty"`
-	Path      string `json:"path,omitempty"`
-	Force     bool   `json:"force,omitempty"`
-	Wait      bool   `json:"wait,omitempty"`
+	Workspace  string `json:"workspace,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Force      bool   `json:"force,omitempty"`
+	Wait       bool   `json:"wait,omitempty"`
+	Embeddings bool   `json:"embeddings,omitempty"`
 }
 
 type WorkspaceQueryIndexStatus struct {
-	Workspace         string            `json:"workspace"`
-	Path              string            `json:"path,omitempty"`
-	State             string            `json:"state"`
-	Message           string            `json:"message,omitempty"`
-	Keyword           queryindex.Status `json:"keyword"`
-	EmbeddingsEnabled bool              `json:"embeddings_enabled"`
-	Model             string            `json:"model,omitempty"`
-	ChunkStrategy     string            `json:"chunk_strategy,omitempty"`
+	Workspace  string               `json:"workspace"`
+	Path       string               `json:"path,omitempty"`
+	State      string               `json:"state"`
+	Message    string               `json:"message,omitempty"`
+	Keyword    queryindex.Status    `json:"keyword"`
+	Embeddings QueryEmbeddingStatus `json:"embeddings"`
+}
+
+type QueryEmbeddingStatus struct {
+	Enabled   bool   `json:"enabled"`
+	Available bool   `json:"available"`
+	Provider  string `json:"provider,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Dimension int    `json:"dimension,omitempty"`
+	Message   string `json:"message,omitempty"`
 }
 
 type WorkspaceQueryIndexRebuildResponse struct {
-	Workspace string                    `json:"workspace"`
-	Path      string                    `json:"path,omitempty"`
-	Keyword   queryindex.RebuildResult  `json:"keyword"`
-	Status    WorkspaceQueryIndexStatus `json:"status"`
-	Message   string                    `json:"message,omitempty"`
+	Workspace  string                        `json:"workspace"`
+	Path       string                        `json:"path,omitempty"`
+	Keyword    queryindex.RebuildResult      `json:"keyword"`
+	Embeddings *QueryEmbeddingBackfillResult `json:"embeddings,omitempty"`
+	Status     WorkspaceQueryIndexStatus     `json:"status"`
+	Message    string                        `json:"message,omitempty"`
+}
+
+type QueryEmbeddingBackfillResult struct {
+	Enabled   bool   `json:"enabled"`
+	Available bool   `json:"available"`
+	Provider  string `json:"provider,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Dimension int    `json:"dimension,omitempty"`
+	Scanned   int    `json:"scanned"`
+	Embedded  int    `json:"embedded"`
+	Message   string `json:"message,omitempty"`
 }
 
 func (s *Service) QueryWorkspace(ctx context.Context, workspace string, request mcptools.FileQueryRequest) (mcptools.FileQueryResponse, error) {
@@ -62,12 +84,8 @@ func (s *Service) QueryWorkspace(ctx context.Context, workspace string, request 
 	}
 	request.Workspace = displayWorkspace
 
-	cfg, err := s.GetWorkspaceConfig(ctx, workspace)
-	if err != nil {
-		return mcptools.FileQueryResponse{}, err
-	}
 	if request.Mode == mcptools.FileQueryModeSemantic {
-		return semanticUnavailableResponse(request, cfg), nil
+		return s.queryWorkspaceSemantic(ctx, workspace, request)
 	}
 
 	if _, _, _, err := EnsureWorkspaceRoot(ctx, s.store, workspace); err != nil {
@@ -83,7 +101,7 @@ func (s *Service) QueryWorkspace(ctx context.Context, workspace string, request 
 		return mcptools.FileQueryResponse{}, fmt.Errorf("query must include at least one searchable keyword")
 	}
 
-	warnings := workspaceQueryWarnings(request, cfg)
+	warnings := workspaceQueryWarnings(request)
 	results, searchErr := queryindex.Search(ctx, s.store.rdb, fsKey, queryindex.SearchSpec{
 		Positive:    spec.Positive,
 		Negative:    spec.Negative,
@@ -148,16 +166,170 @@ func (s *Service) QueryWorkspace(ctx context.Context, workspace string, request 
 	}, nil
 }
 
+func (s *Service) queryWorkspaceSemantic(ctx context.Context, workspace string, request mcptools.FileQueryRequest) (mcptools.FileQueryResponse, error) {
+	if _, _, _, err := EnsureWorkspaceRoot(ctx, s.store, workspace); err != nil {
+		return mcptools.FileQueryResponse{}, err
+	}
+	meta, err := s.store.GetWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return mcptools.FileQueryResponse{}, err
+	}
+	queryText := workspaceSemanticQueryText(request)
+	if queryText == "" {
+		return mcptools.FileQueryResponse{}, fmt.Errorf("semantic query must include text")
+	}
+	provider, err := queryembedding.NewProviderFromEnv("")
+	if err != nil {
+		return semanticUnavailableResponseWithMessage(request, queryEmbeddingUnavailableMessage(err)), nil
+	}
+	vectorResult, err := queryvector.Search(ctx, s.store.rdb, WorkspaceFSKey(workspaceStorageID(meta)), provider, queryText, queryvector.SearchOptions{
+		Path:           request.Path,
+		Limit:          request.Limit,
+		All:            request.All,
+		MinScore:       request.MinScore,
+		CandidateLimit: request.CandidateLimit,
+		Full:           request.Full,
+	})
+	if err != nil {
+		if errors.Is(err, queryembedding.ErrUnavailable) {
+			return semanticUnavailableResponseWithMessage(request, queryEmbeddingUnavailableMessage(err)), nil
+		}
+		return mcptools.FileQueryResponse{}, err
+	}
+	warnings := append([]string(nil), vectorResult.Warnings...)
+	if len(vectorResult.Results) == 0 && vectorResult.Stats.ChunksScanned == 0 {
+		return semanticUnavailableResponseWithMessage(request, "No semantic embeddings are indexed for this query scope. Run query index create --embeddings --wait to build them."), nil
+	}
+	explain := []mcptools.FileQueryExplain(nil)
+	if request.Explain {
+		explain = append(explain, mcptools.FileQueryExplain{
+			Stage:   "semantic",
+			Message: "Vector-ranked retrieval over query chunk embeddings.",
+			Values: map[string]any{
+				"backend":          vectorResult.Stats.Backend,
+				"model":            vectorResult.Stats.Model,
+				"dimension":        vectorResult.Stats.Dimension,
+				"search_available": vectorResult.Stats.SearchAvailable,
+				"chunks_scanned":   vectorResult.Stats.ChunksScanned,
+				"chunks_embedded":  vectorResult.Stats.ChunksEmbedded,
+			},
+		})
+	}
+	return mcptools.FileQueryResponse{
+		Status:    mcptools.FileQueryStatusOK,
+		Workspace: request.Workspace,
+		Path:      request.Path,
+		Query:     request.Query,
+		Searches:  request.Searches,
+		Intent:    request.Intent,
+		Results:   vectorResult.Results,
+		Warnings:  warnings,
+		Explain:   explain,
+	}, nil
+}
+
+func workspaceSemanticQueryText(request mcptools.FileQueryRequest) string {
+	if strings.TrimSpace(request.Query) != "" {
+		return strings.TrimSpace(request.Query)
+	}
+	parts := make([]string, 0, len(request.Searches)+1)
+	for _, search := range request.Searches {
+		switch search.Type {
+		case mcptools.FileQuerySearchVec, mcptools.FileQuerySearchHyde, mcptools.FileQuerySearchLex:
+			if text := strings.TrimSpace(search.Query); text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	if request.Intent != "" {
+		parts = append(parts, request.Intent)
+	}
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func queryEmbeddingStatus() QueryEmbeddingStatus {
+	provider, err := queryembedding.NewProviderFromEnv("")
+	if err == nil {
+		return QueryEmbeddingStatus{
+			Enabled:   true,
+			Available: true,
+			Provider:  provider.Name(),
+			Model:     provider.Model(),
+			Dimension: provider.Dimension(),
+			Message:   "Semantic embeddings are ready.",
+		}
+	}
+	providerName, model := queryEmbeddingConfiguredProviderModel()
+	return QueryEmbeddingStatus{
+		Enabled:  true,
+		Provider: providerName,
+		Model:    model,
+		Message:  queryEmbeddingUnavailableMessage(err),
+	}
+}
+
+func queryEmbeddingConfiguredProviderModel() (string, string) {
+	provider := strings.TrimSpace(strings.ToLower(os.Getenv("AFS_EMBED_PROVIDER")))
+	model := strings.TrimSpace(os.Getenv("AFS_EMBED_MODEL"))
+	if strings.HasPrefix(strings.ToLower(model), "openai:") {
+		provider = "openai"
+	}
+	if provider == "" {
+		provider = queryembedding.DefaultProvider
+	}
+	if model == "" && provider == "openai" {
+		model = "openai:" + queryembedding.DefaultOpenAIModel
+	}
+	if provider == "openai" && model != "" && !strings.HasPrefix(strings.ToLower(model), "openai:") {
+		model = "openai:" + model
+	}
+	return provider, model
+}
+
+func queryEmbeddingUnavailableMessage(err error) string {
+	if err == nil {
+		return "Semantic embeddings are unavailable."
+	}
+	var openAIErr *queryembedding.OpenAIAPIError
+	if errors.As(err, &openAIErr) {
+		return queryEmbeddingOpenAIUnavailableMessage(openAIErr)
+	}
+	msg := strings.TrimSpace(err.Error())
+	if strings.Contains(msg, "OPENAI_API_KEY") {
+		return "Semantic embeddings are unavailable. Set OPENAI_API_KEY in the control-plane environment."
+	}
+	if strings.HasPrefix(msg, queryembedding.ErrUnavailable.Error()+":") {
+		msg = strings.TrimSpace(strings.TrimPrefix(msg, queryembedding.ErrUnavailable.Error()+":"))
+	}
+	if msg == "" {
+		return "Semantic embeddings are unavailable."
+	}
+	return "Semantic embeddings are unavailable. " + msg
+}
+
+func queryEmbeddingOpenAIUnavailableMessage(err *queryembedding.OpenAIAPIError) string {
+	if err == nil {
+		return "Semantic embeddings are unavailable."
+	}
+	model := strings.TrimSpace(err.Model)
+	if model == "" {
+		model = queryembedding.DefaultOpenAIModel
+	}
+	if err.ModelUnavailable() {
+		return fmt.Sprintf("Semantic embeddings are unavailable. OpenAI model %q is not available to this project; set AFS_EMBED_MODEL in the control-plane environment to an available embeddings model and restart the control plane.", model)
+	}
+	if err.Message != "" {
+		return fmt.Sprintf("Semantic embeddings are unavailable. OpenAI embeddings request failed with HTTP %d: %s", err.StatusCode, err.Message)
+	}
+	return fmt.Sprintf("Semantic embeddings are unavailable. OpenAI embeddings request failed with HTTP %d.", err.StatusCode)
+}
+
 func (s *Service) QueryIndexStatus(ctx context.Context, workspace string, request WorkspaceQueryIndexStatusRequest) (WorkspaceQueryIndexStatus, error) {
 	displayWorkspace := strings.TrimSpace(request.Workspace)
 	if displayWorkspace == "" {
 		displayWorkspace = workspace
 	}
 	queryPath := normalizeQueryPath(request.Path)
-	cfg, err := s.GetWorkspaceConfig(ctx, workspace)
-	if err != nil {
-		return WorkspaceQueryIndexStatus{}, err
-	}
 	fsKey, err := s.workspaceQueryFSKey(ctx, workspace)
 	if err != nil {
 		return WorkspaceQueryIndexStatus{}, err
@@ -169,14 +341,13 @@ func (s *Service) QueryIndexStatus(ctx context.Context, workspace string, reques
 	if err != nil {
 		return WorkspaceQueryIndexStatus{}, err
 	}
+	embeddings := queryEmbeddingStatus()
 	status := WorkspaceQueryIndexStatus{
-		Workspace:         displayWorkspace,
-		Path:              queryPath,
-		State:             keyword.State,
-		Keyword:           keyword,
-		EmbeddingsEnabled: cfg.Query.Embeddings.Enabled,
-		Model:             cfg.Query.Embeddings.Model,
-		ChunkStrategy:     cfg.Query.Embeddings.ChunkStrategy,
+		Workspace:  displayWorkspace,
+		Path:       queryPath,
+		State:      keyword.State,
+		Keyword:    keyword,
+		Embeddings: embeddings,
 	}
 	switch keyword.State {
 	case "needs_rebuild":
@@ -208,13 +379,19 @@ func (s *Service) RebuildQueryIndex(ctx context.Context, workspace string, reque
 	if err != nil {
 		return WorkspaceQueryIndexRebuildResponse{}, err
 	}
+	keywordWait := request.Wait || request.Embeddings
 	result, err := queryindex.Rebuild(ctx, s.store.rdb, fsKey, queryindex.RebuildOptions{
 		Path:  queryPath,
 		Force: request.Force,
-		Wait:  request.Wait,
+		Wait:  keywordWait,
 	})
 	if err != nil {
 		return WorkspaceQueryIndexRebuildResponse{}, err
+	}
+	var embeddings *QueryEmbeddingBackfillResult
+	if request.Embeddings {
+		embeddingResult := s.backfillQueryEmbeddings(ctx, fsKey, queryPath)
+		embeddings = &embeddingResult
 	}
 	status, err := s.QueryIndexStatus(ctx, workspace, WorkspaceQueryIndexStatusRequest{
 		Workspace: displayWorkspace,
@@ -224,12 +401,47 @@ func (s *Service) RebuildQueryIndex(ctx context.Context, workspace string, reque
 		return WorkspaceQueryIndexRebuildResponse{}, err
 	}
 	return WorkspaceQueryIndexRebuildResponse{
-		Workspace: displayWorkspace,
-		Path:      queryPath,
-		Keyword:   result,
-		Status:    status,
-		Message:   fmt.Sprintf("Enqueued %d file(s) for keyword query indexing.", result.Enqueued),
+		Workspace:  displayWorkspace,
+		Path:       queryPath,
+		Keyword:    result,
+		Embeddings: embeddings,
+		Status:     status,
+		Message:    queryIndexRebuildMessage(result.Enqueued, embeddings),
 	}, nil
+}
+
+func (s *Service) backfillQueryEmbeddings(ctx context.Context, fsKey, queryPath string) QueryEmbeddingBackfillResult {
+	provider, err := queryembedding.NewProviderFromEnv("")
+	if err != nil {
+		return QueryEmbeddingBackfillResult{
+			Enabled: true,
+			Message: queryEmbeddingUnavailableMessage(err),
+		}
+	}
+	result := QueryEmbeddingBackfillResult{
+		Enabled:   true,
+		Available: true,
+		Provider:  provider.Name(),
+		Model:     provider.Model(),
+		Dimension: provider.Dimension(),
+	}
+	stats, err := queryvector.Backfill(ctx, s.store.rdb, fsKey, provider, queryvector.SearchOptions{Path: queryPath})
+	result.Scanned = stats.Scanned
+	result.Embedded = stats.Embedded
+	if err != nil {
+		result.Available = false
+		result.Message = queryEmbeddingUnavailableMessage(err)
+		return result
+	}
+	result.Message = fmt.Sprintf("Indexed %d semantic embedding chunk(s).", stats.Embedded)
+	return result
+}
+
+func queryIndexRebuildMessage(enqueued int, embeddings *QueryEmbeddingBackfillResult) string {
+	if embeddings != nil {
+		return fmt.Sprintf("Enqueued %d file(s) for keyword query indexing and indexed %d semantic embedding chunk(s).", enqueued, embeddings.Embedded)
+	}
+	return fmt.Sprintf("Enqueued %d file(s) for keyword query indexing.", enqueued)
 }
 
 func (s *Service) workspaceQueryFSKey(ctx context.Context, workspace string) (string, error) {
@@ -243,11 +455,7 @@ func (s *Service) workspaceQueryFSKey(ctx context.Context, workspace string) (st
 	return WorkspaceFSKey(workspaceStorageID(meta)), nil
 }
 
-func semanticUnavailableResponse(request mcptools.FileQueryRequest, cfg WorkspaceConfig) mcptools.FileQueryResponse {
-	message := "Semantic query is not available in this build yet."
-	if !cfg.Query.Embeddings.Enabled {
-		message = "Semantic query is disabled for this workspace."
-	}
+func semanticUnavailableResponseWithMessage(request mcptools.FileQueryRequest, message string) mcptools.FileQueryResponse {
 	return mcptools.FileQueryResponse{
 		Status:    mcptools.FileQueryStatusUnavailable,
 		Workspace: request.Workspace,
@@ -260,13 +468,10 @@ func semanticUnavailableResponse(request mcptools.FileQueryRequest, cfg Workspac
 	}
 }
 
-func workspaceQueryWarnings(request mcptools.FileQueryRequest, cfg WorkspaceConfig) []string {
+func workspaceQueryWarnings(request mcptools.FileQueryRequest) []string {
 	warnings := make([]string, 0)
-	if request.Mode == mcptools.FileQueryModeHybrid && cfg.Query.Embeddings.Enabled {
-		warnings = append(warnings, "Hybrid vector/rerank retrieval is not ready yet; showing keyword-ranked results.")
-	}
-	if request.Mode == mcptools.FileQueryModeHybrid && !cfg.Query.Embeddings.Enabled && querysearch.HasSemanticClauses(request.Searches) {
-		warnings = append(warnings, "Embeddings are disabled; vec:/hyde: clauses were used as keyword text only.")
+	if request.Mode == mcptools.FileQueryModeHybrid && querysearch.HasSemanticClauses(request.Searches) {
+		warnings = append(warnings, "Hybrid vector/rerank retrieval is not ready yet; semantic clauses were keyword-ranked. Use --semantic for vector-only retrieval.")
 	}
 	return warnings
 }

@@ -213,9 +213,16 @@ If you want to search workspace contents:
 ```
 
 `grep` is for exact text evidence. `query` is for ranked conceptual search and
-falls back to keyword-ranked results when embeddings are disabled or
-unavailable. Keyword ranking uses RedisSearch BM25 query chunks when available,
-then falls back to direct content ranking.
+currently falls back to keyword-ranked results until hybrid vector/rerank is
+complete. Keyword ranking uses RedisSearch BM25 query chunks when available,
+then falls back to direct content ranking. Use `query --semantic` for
+vector-only retrieval. Semantic embeddings are globally enabled and use OpenAI
+when `OPENAI_API_KEY` is available in the control-plane environment. Override
+the default `openai:text-embedding-3-small` model with `AFS_EMBED_MODEL` in the
+same environment, then restart the control plane. Semantic queries read
+existing embedding indexes; imports start embedding creation in the background,
+and existing workspaces can be prepared with
+`afs fs <workspace> query index create --embeddings --wait`.
 
 If you want commands with an optional workspace argument to use `my-repo` by
 default:

@@ -384,6 +384,7 @@ func TestAFSMCPFileQueryRanksWorkspaceContent(t *testing.T) {
 
 func TestAFSMCPFileQueryTypedClausesAndSemanticUnavailable(t *testing.T) {
 	t.Helper()
+	t.Setenv("OPENAI_API_KEY", "")
 
 	server, closeFn := setupAFSMCPTestServer(t)
 	defer closeFn()
@@ -415,8 +416,8 @@ func TestAFSMCPFileQueryTypedClausesAndSemanticUnavailable(t *testing.T) {
 	if len(response.Results) != 1 || response.Results[0].Path != "/docs/checkpoints.md" {
 		t.Fatalf("results = %#v, want scoped docs result", response.Results)
 	}
-	if len(response.Warnings) != 1 || !strings.Contains(response.Warnings[0], "Embeddings are disabled") {
-		t.Fatalf("warnings = %#v, want embeddings disabled fallback", response.Warnings)
+	if len(response.Warnings) != 1 || !strings.Contains(response.Warnings[0], "semantic clauses were keyword-ranked") {
+		t.Fatalf("warnings = %#v, want semantic-clause fallback", response.Warnings)
 	}
 
 	semantic := server.callTool(context.Background(), "file_query", map[string]any{

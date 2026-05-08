@@ -125,15 +125,13 @@ Shared query options:
 --chunk-strategy <regex|auto>
 ```
 
-Workspace config:
+Workspace config remains for versioning. Embedding provider/model are global
+runtime settings:
 
 ```bash
 afs ws config repo list
-afs ws config repo get query.embeddings.enabled
-afs ws config repo set query.embeddings.enabled true
-afs ws config repo set query.embeddings.model embeddinggemma
-afs ws config repo set query.embeddings.chunkStrategy auto
-afs ws config repo unset query.embeddings.model
+export OPENAI_API_KEY=...
+export AFS_EMBED_MODEL=openai:text-embedding-3-small
 ```
 
 Vector index operations:
@@ -190,7 +188,7 @@ Result shape:
     }
   ],
   "index": {
-    "model": "embeddinggemma",
+    "model": "openai:text-embedding-3-small",
     "embedding_state": "ready",
     "pending_files": 0,
     "stale_files": 0
@@ -281,11 +279,17 @@ workspace's vector data.
 
 ### Embedding Engine
 
-Use a local model by default, matching QMD's approach:
+Initial implementation uses OpenAI embeddings with QMD-style query/document
+formatting. QMD's local GGUF model remains the target for a later local runtime
+slice.
 
-- Default model: `embeddinggemma-300M-Q8_0.gguf`.
+- Default model: `openai:text-embedding-3-small`.
+- Required environment: `OPENAI_API_KEY`.
+- Optional environment: `OPENAI_BASE_URL`, `AFS_EMBED_PROVIDER`,
+  `AFS_EMBED_MODEL`, `AFS_EMBED_DIMENSIONS`.
+- QMD local model target: `embeddinggemma-300M-Q8_0.gguf`.
 - Default cache directory: `~/.cache/afs/models`.
-- Environment override:
+- Future local runtime override:
 
 ```bash
 AFS_EMBED_MODEL="hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf"
@@ -407,9 +411,8 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 - [x] Add this plan to `plans/`.
 - [x] Add workspace config request/response structs and key validation for
       `afs ws config <workspace> get|set|list|unset`.
-- [x] Add query embedding config keys:
-      `query.embeddings.enabled`, `query.embeddings.model`, and
-      `query.embeddings.chunkStrategy`.
+- [x] Add initial query embedding config keys.
+- [x] Move public embedding provider/model behavior to global runtime settings.
 - [x] Define `file_query` MCP request/response structs in a shared package.
 - [x] Define CLI option structs for `query` and its `--keyword` / `--semantic`
       modes.
@@ -459,8 +462,7 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 ### Phase 5 - Embedding worker and write hooks
 
 - [ ] Add embedding pending queue and metadata keys.
-- [ ] Gate enqueue/rebuild behavior on workspace config
-      `query.embeddings.enabled`.
+- [ ] Gate enqueue/rebuild behavior on global embedding provider availability.
 - [x] Hook control-plane workspace materialization/import to enqueue keyword
       query projection work.
 - [x] Hook mount/sync write paths to enqueue keyword query projection work after
@@ -534,8 +536,7 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
   retrieval is unavailable.
 - Fourth implementation slice landed: `afs query index status|rebuild|clean`
   and `afs fs <workspace> query index ...` exist as the vector-index operations
-  surface. Status reflects workspace embedding config; rebuild reports the
-  vector worker as unavailable until the embedding backend lands.
+  surface. Status reports global embedding provider availability.
 - Fifth implementation slice landed: local and hosted MCP expose `file_query`
   beside deterministic `file_grep`, using the shared query request/response and
   keyword-ranking fallback.
@@ -570,9 +571,9 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 - **Derived projections.** Canonical file bytes stay in the filesystem content
   backend. Grep and query maintain rebuildable HASH projections because
   RediSearch cannot index Redis Array values directly.
-- **Local-first embeddings.** Default to a local GGUF embedding model,
-  conceptually matching QMD's `embeddinggemma-300M-Q8_0` setup. Cloud/provider
-  embeddings can be added later behind explicit configuration.
+- **Provider-first embeddings.** The first implementation uses OpenAI
+  embeddings with QMD-style formatting. A local GGUF runtime remains the later
+  target for matching QMD's download-and-cache behavior.
 - **Async indexing.** File writes enqueue embedding work and return. Search
   status must make staleness visible.
 - **Reranking later.** Preserve `--no-rerank` / `rerank:auto` API space, but
@@ -597,7 +598,7 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 - [ ] Manual smoke:
 
 ```bash
-afs ws config getting-started set query.embeddings.enabled true
+export OPENAI_API_KEY=...
 afs fs getting-started query index rebuild --force --wait
 afs fs getting-started query --semantic "how do I save a snapshot?"
 afs fs getting-started query "how do checkpoints work?"

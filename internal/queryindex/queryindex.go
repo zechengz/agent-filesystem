@@ -567,47 +567,8 @@ func Search(ctx context.Context, rdb *redis.Client, fsKey string, spec SearchSpe
 	if !ok {
 		return nil, ErrSearchUnavailable
 	}
-	pending, err := PendingCount(ctx, rdb, fsKey)
-	if err != nil {
+	if err := EnsureReady(ctx, rdb, fsKey, opts.Path, opts.CandidateLimit); err != nil {
 		return nil, err
-	}
-	if pending > 0 {
-		catchupLimit := opts.CandidateLimit
-		if catchupLimit <= 0 {
-			catchupLimit = 256
-		}
-		if _, err := ProcessPending(ctx, rdb, fsKey, catchupLimit); err != nil {
-			return nil, err
-		}
-		pending, _ = PendingCount(ctx, rdb, fsKey)
-		if pending > 0 {
-			return nil, ErrProjectionStale
-		}
-	}
-	if pending == 0 {
-		checked, err := rdb.HGet(ctx, ReadyKey(fsKey), "backfill_checked_at_ms").Result()
-		if (err == nil && strings.TrimSpace(checked) == "") || errors.Is(err, redis.Nil) {
-			if _, err := EnqueueFiles(ctx, rdb, fsKey, opts.Path, false); err != nil {
-				return nil, err
-			}
-			pending, err = PendingCount(ctx, rdb, fsKey)
-			if err != nil {
-				return nil, err
-			}
-			if pending > 0 {
-				catchupLimit := opts.CandidateLimit
-				if catchupLimit <= 0 {
-					catchupLimit = 256
-				}
-				if _, err := ProcessPending(ctx, rdb, fsKey, catchupLimit); err != nil {
-					return nil, err
-				}
-				pending, _ = PendingCount(ctx, rdb, fsKey)
-				if pending > 0 {
-					return nil, ErrProjectionStale
-				}
-			}
-		}
 	}
 
 	query := BuildSearchQuery(spec, opts.Path)
@@ -690,6 +651,56 @@ func Search(ctx context.Context, rdb *redis.Client, fsKey string, spec SearchSpe
 		out = out[:opts.Limit]
 	}
 	return out, nil
+}
+
+func EnsureReady(ctx context.Context, rdb *redis.Client, fsKey, scopePath string, candidateLimit int) error {
+	if rdb == nil {
+		return ErrSearchUnavailable
+	}
+	pending, err := PendingCount(ctx, rdb, fsKey)
+	if err != nil {
+		return err
+	}
+	if pending > 0 {
+		if err := processPendingToQuiescence(ctx, rdb, fsKey, candidateLimit); err != nil {
+			return err
+		}
+		pending, _ = PendingCount(ctx, rdb, fsKey)
+		if pending > 0 {
+			return ErrProjectionStale
+		}
+	}
+	if pending == 0 {
+		checked, err := rdb.HGet(ctx, ReadyKey(fsKey), "backfill_checked_at_ms").Result()
+		if (err == nil && strings.TrimSpace(checked) == "") || errors.Is(err, redis.Nil) {
+			if _, err := EnqueueFiles(ctx, rdb, fsKey, scopePath, false); err != nil {
+				return err
+			}
+			pending, err = PendingCount(ctx, rdb, fsKey)
+			if err != nil {
+				return err
+			}
+			if pending > 0 {
+				if err := processPendingToQuiescence(ctx, rdb, fsKey, candidateLimit); err != nil {
+					return err
+				}
+				pending, _ = PendingCount(ctx, rdb, fsKey)
+				if pending > 0 {
+					return ErrProjectionStale
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func processPendingToQuiescence(ctx context.Context, rdb *redis.Client, fsKey string, candidateLimit int) error {
+	catchupLimit := candidateLimit
+	if catchupLimit <= 0 {
+		catchupLimit = 256
+	}
+	_, err := ProcessPending(ctx, rdb, fsKey, catchupLimit)
+	return err
 }
 
 type SearchSpec struct {

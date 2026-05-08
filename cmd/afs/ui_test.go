@@ -86,3 +86,26 @@ func TestFormatCLIErrorPreservesUsageBlocks(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatCLIErrorPreservesFullHelpBlocks(t *testing.T) {
+	t.Helper()
+
+	got := formatCLIError(errors.New("unknown filesystem subcommand \"search\"\n\n" + fsUsageText("afs")))
+	for _, want := range []string{
+		"Subcommands:\n  ls                 List workspace files\n  cat                Print a workspace file",
+		"Examples:\n  afs fs demo ls\n  afs fs ls",
+		`afs fs demo query --semantic "where is workspace config handled?"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatCLIError() = %q, want substring %q", got, want)
+		}
+	}
+	for _, unwanted := range []string{
+		"\n  Ls                 List workspace files.",
+		"\n  Afs fs demo ls.",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("formatCLIError() = %q, did not want substring %q", got, unwanted)
+		}
+	}
+}

@@ -408,16 +408,21 @@ afs fs [workspace] query index rebuild --wait
 ```
 
 Ranks workspace files for a concept or natural-language question. Plain
-`query` is the recommended hybrid surface. While vector retrieval is still
-behind the embedding index, it falls back to keyword-ranked results. Keyword
-ranking uses Redis Search BM25 over a chunk-level HASH projection when
-available, with a direct content-ranking fallback. Use `grep` when you know the
-exact text.
+`query` is the recommended hybrid surface and currently falls back to
+keyword-ranked results until hybrid vector/rerank is complete. Keyword ranking
+uses Redis Search BM25 over a chunk-level HASH projection when available, with
+a direct content-ranking fallback. `query --semantic` runs vector-only
+retrieval through the global embedding provider. Semantic embeddings are on by
+default; AFS currently supports OpenAI embeddings through `OPENAI_API_KEY` in
+the control-plane environment. Redis vector KNN is used when available, with a
+direct vector-ranking fallback. Use `grep` when you know the exact text.
 
-Existing workspaces are backfilled automatically on first query when Redis
-Search is available. Use `query index status --json` to inspect files, ready
-chunks, pending work, skipped files, and unindexed files. Use
-`query index rebuild --wait` to force an immediate backfill.
+Semantic queries do not backfill embeddings. Imports start embedding creation
+in the background when the global provider is available. Use
+`query index status --json` to inspect files, ready chunks, pending work,
+skipped files, and unindexed files. Use `query index create --embeddings --wait`
+to explicitly build keyword chunks and semantic embeddings for an existing
+workspace.
 
 Flags:
 
@@ -428,7 +433,7 @@ Flags:
 | `--all` | Return all results. |
 | `--min-score <num>` | Minimum score. |
 | `--json` | Write JSON output. |
-| `--files` | Write QMD-style `#id,score,afs://workspace/path` lines. |
+| `--files` | Write QMD-style `#id,score,afs://workspace/path` lines, deduplicated to one candidate per file. |
 | `--paths` | Show only matching workspace paths. |
 | `--csv` | Write CSV output. |
 | `--md` | Write Markdown output. |
@@ -439,9 +444,39 @@ Flags:
 | `--candidate-limit <num>` | Candidate result limit. |
 | `--no-rerank` | Disable reranking when available. |
 | `--keyword` | Keyword-ranked retrieval only. |
-| `--semantic` | Vector-only semantic retrieval. Requires embeddings. |
+| `--semantic` | Vector-only semantic retrieval through the global embedding provider. |
 | `--intent <text>` | Extra search intent. |
 | `--chunk-strategy <auto|regex>` | Chunk strategy. |
+
+Query index commands:
+
+```bash
+afs fs repo query index status
+afs fs repo query index create --embeddings --wait
+afs fs repo query index rebuild --wait
+```
+
+OpenAI embedding setup:
+
+```bash
+export OPENAI_API_KEY=...
+export AFS_EMBED_MODEL=openai:text-embedding-3-small
+# Start or restart afs-control-plane from this environment.
+afs fs repo query --semantic "how do checkpoints work?"
+```
+
+Optional environment overrides:
+
+```bash
+export AFS_EMBED_PROVIDER=openai
+export AFS_EMBED_MODEL=openai:text-embedding-3-small
+export AFS_EMBED_DIMENSIONS=1536
+export OPENAI_BASE_URL=https://api.openai.com
+```
+
+`OPENAI_API_KEY`, `AFS_EMBED_MODEL`, `AFS_EMBED_PROVIDER`, and
+`AFS_EMBED_DIMENSIONS` are read by the control-plane process, not by each
+individual `afs query` invocation.
 
 Typed query documents are supported on the default `query` mode:
 

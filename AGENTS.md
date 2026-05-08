@@ -247,6 +247,9 @@ The most important implementation seams are:
   control-plane behavior.
 - Top-level filesystem shortcut help must say shortcuts use the "default"
   workspace and that explicit targeting requires `afs fs <workspace> <command>`.
+- CLI error rendering must preserve help and usage blocks literally. Do not
+  sentence-format, title-case, or append punctuation to command names, flags,
+  examples, or subcommand lists.
 - Sync mount cold-start in Cloud-managed mode must hydrate from the workspace
   session's storage key/head checkpoint. Do not require direct Redis workspace
   metadata lookup by display name; cloud session Redis may expose the live root
@@ -256,6 +259,27 @@ The most important implementation seams are:
   supports `lex:`, `vec:`, `hyde:`, and `intent:` documents, and uses
   `--keyword` / `--semantic` for narrower modes. Do not reintroduce public
   `search` or `vsearch` commands unless the product direction changes again.
+- Semantic query embeddings must use a real provider. QMD uses a local GGUF
+  embedding model with explicit query/document formatting; deterministic hash
+  embeddings are acceptable only as test doubles, never as product behavior.
+- Semantic query provider/model settings are global runtime settings, not
+  workspace config. Embeddings should be treated as on by default; if provider
+  credentials are missing, return/report unavailable status without hard-failing
+  normal query flows.
+- `AFS_EMBED_MODEL`, `AFS_EMBED_PROVIDER`, `AFS_EMBED_DIMENSIONS`, and
+  `OPENAI_API_KEY` are read by the control-plane process. CLI help and
+  troubleshooting copy must not imply that setting them only on an `afs query`
+  invocation changes an already-running control plane.
+- Semantic embedding backfill must batch provider requests. Query chunks are
+  individually capped, but a large workspace can still exceed OpenAI's total
+  tokens-per-request limit if every pending chunk is embedded at once.
+- Semantic query can take longer than normal control-plane calls on first
+  provider backfill. Keep query HTTP client timeouts separate from quick
+  metadata/status calls so first-run embedding work does not fail at 30s.
+- Semantic query must not backfill embeddings as a side effect. Imports should
+  start embedding creation in the control plane when the global provider is
+  available, and existing workspaces should use an explicit query index create
+  path for embedding backfill.
 - Workspace file/query CLI calls use resolved workspace routes under
   `/v1/workspaces/<id>/...`; when adding a scoped database route, add the
   matching resolved route and a regression test for workspace IDs.

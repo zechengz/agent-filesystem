@@ -416,6 +416,26 @@ func (c *httpControlPlaneClient) RebuildQueryIndex(ctx context.Context, workspac
 	return out, err
 }
 
+func (c *httpControlPlaneClient) QueryModelStatus(ctx context.Context, request controlplane.QueryModelStatusRequest) (controlplane.QueryModelStatus, error) {
+	params := url.Values{}
+	if strings.TrimSpace(request.Model) != "" {
+		params.Set("model", strings.TrimSpace(request.Model))
+	}
+	rel := "/v1/query/model/status"
+	if encoded := params.Encode(); encoded != "" {
+		rel += "?" + encoded
+	}
+	var out controlplane.QueryModelStatus
+	err := c.doJSON(ctx, http.MethodGet, rel, nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) DownloadQueryModel(ctx context.Context, request controlplane.QueryModelDownloadRequest) (controlplane.QueryModelDownloadResult, error) {
+	var out controlplane.QueryModelDownloadResult
+	err := c.doJSONWithClient(ctx, c.queryer, http.MethodPost, "/v1/query/model/download", request, &out, http.StatusOK)
+	return out, err
+}
+
 func (c *httpControlPlaneClient) DiffWorkspace(ctx context.Context, workspace, baseView, headView string) (controlplane.WorkspaceDiffResponse, error) {
 	params := url.Values{}
 	if strings.TrimSpace(baseView) != "" {

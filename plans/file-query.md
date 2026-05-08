@@ -130,8 +130,8 @@ runtime settings:
 
 ```bash
 afs ws config repo list
-export OPENAI_API_KEY=...
-export AFS_EMBED_MODEL=openai:text-embedding-3-small
+afs query model download
+export AFS_EMBED_MODEL=hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf
 ```
 
 Vector index operations:
@@ -279,14 +279,16 @@ workspace's vector data.
 
 ### Embedding Engine
 
-Initial implementation uses OpenAI embeddings with QMD-style query/document
-formatting. QMD's local GGUF model remains the target for a later local runtime
-slice.
+Implementation supports default OpenAI embeddings and optional local GGUF
+embeddings with QMD-style query/document formatting. The local provider uses a
+managed Node helper with `node-llama-cpp`, resolving/downloading/loading the
+GGUF through the same runtime path used for embedding.
 
-- Default model: `openai:text-embedding-3-small`.
-- Required environment: `OPENAI_API_KEY`.
+- Default OpenAI model: `openai:text-embedding-3-small`.
+- Default local model:
+  `hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf`.
 - Optional environment: `OPENAI_BASE_URL`, `AFS_EMBED_PROVIDER`,
-  `AFS_EMBED_MODEL`, `AFS_EMBED_DIMENSIONS`.
+  `AFS_EMBED_MODEL`, `AFS_EMBED_DIMENSIONS`, `OPENAI_API_KEY`.
 - QMD local model target: `embeddinggemma-300M-Q8_0.gguf`.
 - Default cache directory: `~/.cache/afs/models`.
 - Future local runtime override:
@@ -444,9 +446,9 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 
 - [ ] Add `internal/embedding` engine interface.
 - [ ] Add deterministic fake embedder for tests.
-- [ ] Add local GGUF model config and model identity/dimension handling.
-- [ ] Add model cache path and environment overrides.
-- [ ] Add clear errors for missing model/runtime.
+- [x] Add local GGUF model config and model identity/dimension handling.
+- [x] Add model cache path and environment overrides.
+- [x] Add clear errors for missing model/runtime.
 - [ ] Add model-change detection that requires `query index rebuild --force`.
 
 ### Phase 4 - Chunking
@@ -571,9 +573,9 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 - **Derived projections.** Canonical file bytes stay in the filesystem content
   backend. Grep and query maintain rebuildable HASH projections because
   RediSearch cannot index Redis Array values directly.
-- **Provider-first embeddings.** The first implementation uses OpenAI
-  embeddings with QMD-style formatting. A local GGUF runtime remains the later
-  target for matching QMD's download-and-cache behavior.
+- **Provider-first embeddings.** The implementation uses default OpenAI or
+  optional local GGUF embeddings with QMD-style formatting. Local GGUF uses the
+  control-plane model cache plus a managed `node-llama-cpp` helper.
 - **Async indexing.** File writes enqueue embedding work and return. Search
   status must make staleness visible.
 - **Reranking later.** Preserve `--no-rerank` / `rerank:auto` API space, but

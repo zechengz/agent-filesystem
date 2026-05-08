@@ -262,10 +262,16 @@ The most important implementation seams are:
 - Semantic query embeddings must use a real provider. QMD uses a local GGUF
   embedding model with explicit query/document formatting; deterministic hash
   embeddings are acceptable only as test doubles, never as product behavior.
+- Pure local embedding model work means downloading and caching the GGUF
+  artifact itself. Do not substitute Ollama or another local service shim when
+  the requirement is "pure GGUF".
+- Local GGUF embeddings are an explicit provider override using a managed Node
+  helper with `node-llama-cpp`, matching QMD's model lifecycle. Do not swap this
+  back to per-call `llama-embedding` process invocations.
 - Semantic query provider/model settings are global runtime settings, not
   workspace config. Embeddings should be treated as on by default; if provider
-  credentials are missing, return/report unavailable status without hard-failing
-  normal query flows.
+  runtime dependencies are missing, return/report unavailable status without
+  hard-failing normal query flows.
 - `AFS_EMBED_MODEL`, `AFS_EMBED_PROVIDER`, `AFS_EMBED_DIMENSIONS`, and
   `OPENAI_API_KEY` are read by the control-plane process. CLI help and
   troubleshooting copy must not imply that setting them only on an `afs query`

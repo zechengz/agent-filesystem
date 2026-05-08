@@ -216,12 +216,16 @@ If you want to search workspace contents:
 currently falls back to keyword-ranked results until hybrid vector/rerank is
 complete. Keyword ranking uses RedisSearch BM25 query chunks when available,
 then falls back to direct content ranking. Use `query --semantic` for
-vector-only retrieval. Semantic embeddings are globally enabled and use OpenAI
-when `OPENAI_API_KEY` is available in the control-plane environment. Override
-the default `openai:text-embedding-3-small` model with `AFS_EMBED_MODEL` in the
-same environment, then restart the control plane. Semantic queries read
-existing embedding indexes; imports start embedding creation in the background,
-and existing workspaces can be prepared with
+vector-only retrieval. Semantic embeddings are globally enabled and default to
+OpenAI when `OPENAI_API_KEY` is set in the control-plane environment. For the
+explicit local provider, `afs query model download` asks the control plane to
+resolve, download, and load
+`hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf` through the
+same `node-llama-cpp` helper used for local indexing. On AFS Cloud, only an
+admin identity can trigger the server-side local model warm-up. Override model
+selection with `AFS_EMBED_MODEL` in the control-plane environment, then restart
+the control plane. Semantic queries read existing embedding indexes; imports start
+embedding creation in the background, and existing workspaces can be prepared with
 `afs fs <workspace> query index create --embeddings --wait`.
 
 If you want commands with an optional workspace argument to use `my-repo` by

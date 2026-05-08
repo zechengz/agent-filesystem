@@ -85,3 +85,52 @@ func TestHTTPControlPlaneClientQueryIndexRebuildUsesLongRunningClient(t *testing
 		t.Fatal("query index rebuild route was not called")
 	}
 }
+
+func TestHTTPControlPlaneClientQueryModelRoutes(t *testing.T) {
+	t.Helper()
+
+	queryClientUsed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/query/model/status":
+			if r.Method != http.MethodGet {
+				t.Fatalf("status method = %s, want GET", r.Method)
+			}
+			if r.URL.Query().Get("model") != "hf:org/repo/model.gguf" {
+				t.Fatalf("status model = %q", r.URL.Query().Get("model"))
+			}
+			_ = json.NewEncoder(w).Encode(controlplane.QueryModelStatus{})
+		case "/v1/query/model/download":
+			if r.Method != http.MethodPost {
+				t.Fatalf("download method = %s, want POST", r.Method)
+			}
+			queryClientUsed = true
+			var req controlplane.QueryModelDownloadRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("Decode(download request) returned error: %v", err)
+			}
+			if req.Model != "hf:org/repo/model.gguf" {
+				t.Fatalf("download model = %q", req.Model)
+			}
+			_ = json.NewEncoder(w).Encode(controlplane.QueryModelDownloadResult{})
+		default:
+			t.Fatalf("path = %q, want query model route", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &httpControlPlaneClient{
+		baseURL: server.URL,
+		client:  &http.Client{Timeout: time.Minute},
+		queryer: &http.Client{Timeout: time.Minute},
+	}
+	if _, err := client.QueryModelStatus(context.Background(), controlplane.QueryModelStatusRequest{Model: "hf:org/repo/model.gguf"}); err != nil {
+		t.Fatalf("QueryModelStatus() returned error: %v", err)
+	}
+	if _, err := client.DownloadQueryModel(context.Background(), controlplane.QueryModelDownloadRequest{Model: "hf:org/repo/model.gguf"}); err != nil {
+		t.Fatalf("DownloadQueryModel() returned error: %v", err)
+	}
+	if !queryClientUsed {
+		t.Fatal("query model download route was not called with long-running client")
+	}
+}

@@ -405,6 +405,8 @@ afs fs [workspace] query --keyword <query>
 afs fs [workspace] query --semantic <query>
 afs fs [workspace] query index status
 afs fs [workspace] query index rebuild --wait
+afs query model status
+afs query model download
 ```
 
 Ranks workspace files for a concept or natural-language question. Plain
@@ -413,9 +415,12 @@ keyword-ranked results until hybrid vector/rerank is complete. Keyword ranking
 uses Redis Search BM25 over a chunk-level HASH projection when available, with
 a direct content-ranking fallback. `query --semantic` runs vector-only
 retrieval through the global embedding provider. Semantic embeddings are on by
-default; AFS currently supports OpenAI embeddings through `OPENAI_API_KEY` in
-the control-plane environment. Redis vector KNN is used when available, with a
-direct vector-ranking fallback. Use `grep` when you know the exact text.
+default; AFS runs real embedding generation through OpenAI when
+`OPENAI_API_KEY` is set in the control-plane environment, with local GGUF
+available as an explicit provider override. It manages a global local GGUF
+model cache for the local provider path. Redis vector KNN is used when
+available, with a direct vector-ranking fallback. Use `grep` when you know the
+exact text.
 
 Semantic queries do not backfill embeddings. Imports start embedding creation
 in the background when the global provider is available. Use
@@ -456,6 +461,26 @@ afs fs repo query index create --embeddings --wait
 afs fs repo query index rebuild --wait
 ```
 
+Global local GGUF model commands:
+
+```bash
+afs query model status
+afs query model download
+afs query model download --model hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf
+```
+
+`afs query model download` asks the control plane's local embedding helper to
+resolve, download, and load the pure GGUF artifact. The cache is global to the
+control plane, not a workspace and not the invoking client's cache. On AFS
+Cloud, only an admin identity can trigger this server-side warm-up. The default
+model is
+`hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf`. Set
+`AFS_EMBED_MODEL_DIR` in the control-plane environment to override the cache
+directory. GGUF inference uses a managed Node helper with `node-llama-cpp`, the
+same runtime shape QMD uses. Set `AFS_EMBED_HELPER_CMD` to override the Node.js
+command, or `AFS_NODE_LLAMA_CPP_MODULE` to point at a specific
+`node-llama-cpp` module.
+
 OpenAI embedding setup:
 
 ```bash
@@ -465,18 +490,35 @@ export AFS_EMBED_MODEL=openai:text-embedding-3-small
 afs fs repo query --semantic "how do checkpoints work?"
 ```
 
+Local GGUF setup:
+
+```bash
+export AFS_EMBED_PROVIDER=local
+afs query model download
+export AFS_EMBED_MODEL=hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf
+# Start or restart afs-control-plane from this environment.
+```
+
+With `AFS_EMBED_PROVIDER=local`, the control plane embeds with the cached GGUF
+through the persistent Node helper. The default EmbeddingGemma model uses 768
+dimensions; set `AFS_EMBED_DIMENSIONS` for other local GGUF embedding models.
+
 Optional environment overrides:
 
 ```bash
-export AFS_EMBED_PROVIDER=openai
+export AFS_EMBED_PROVIDER=openai # or local
 export AFS_EMBED_MODEL=openai:text-embedding-3-small
 export AFS_EMBED_DIMENSIONS=1536
+export AFS_EMBED_MODEL_DIR=~/.cache/afs/models
+export AFS_EMBED_HELPER_CMD=node
+export AFS_NODE_LLAMA_CPP_MODULE=node-llama-cpp
 export OPENAI_BASE_URL=https://api.openai.com
 ```
 
 `OPENAI_API_KEY`, `AFS_EMBED_MODEL`, `AFS_EMBED_PROVIDER`, and
 `AFS_EMBED_DIMENSIONS` are read by the control-plane process, not by each
-individual `afs query` invocation.
+individual `afs query` invocation. `afs query model status/download` call the
+control plane to inspect or populate the global local GGUF cache.
 
 Typed query documents are supported on the default `query` mode:
 

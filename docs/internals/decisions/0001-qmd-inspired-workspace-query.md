@@ -43,13 +43,17 @@ status without a hard failure.
 The semantic path uses the same Redis Search chunk documents with path filters.
 It writes real provider embedding vectors onto chunk HASHes, uses Redis vector
 KNN when available, and falls back to direct vector ranking when the Redis
-vector backend is unavailable. The first real provider is OpenAI embeddings via
-`OPENAI_API_KEY` in the control-plane environment and model names like
-`openai:text-embedding-3-small`. QMD's local GGUF model path remains the target
-local-first provider, but fake hash vectors must not be exposed as product
-behavior. VectorSets are not the primary backend because AFS needs rich
-metadata filters, lexical search, hybrid ranking, and result explanation in the
-same retrieval model.
+vector backend is unavailable. The default real provider is OpenAI via
+`OPENAI_API_KEY` and model names like `openai:text-embedding-3-small`; local
+GGUF is available as an explicit provider override through a managed Node helper
+using `node-llama-cpp`. AFS manages a global pure GGUF local model cache through
+`afs query model status/download`, defaulting to
+`hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf`. The
+download command asks the control-plane helper to resolve and load the model,
+and AFS Cloud requires an admin identity for it. Fake hash vectors must not be
+exposed as product behavior. VectorSets are not the primary backend because AFS needs rich
+metadata filters, lexical search, hybrid ranking, and result explanation in
+the same retrieval model.
 
 Keyword query uses the same projection pattern first: one derived HASH per text
 chunk, indexed by RediSearch BM25 when available. Canonical file bytes remain

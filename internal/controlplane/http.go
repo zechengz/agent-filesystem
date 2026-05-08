@@ -413,6 +413,44 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 		writeJSON(w, http.StatusOK, response)
 	})
 
+	mux.HandleFunc("/v1/query/model/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.QueryModelStatus(r.Context(), QueryModelStatusRequest{
+			Model: r.URL.Query().Get("model"),
+		})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	})
+
+	mux.HandleFunc("/v1/query/model/download", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		if !requireQueryModelDownloadPermission(w, r) {
+			return
+		}
+		var input QueryModelDownloadRequest
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+				writeError(w, fmt.Errorf("decode query model download request: %w", err))
+				return
+			}
+		}
+		response, err := manager.DownloadQueryModel(r.Context(), input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	})
+
 	mux.HandleFunc("/v1/cli", handleCLIDownload)
 	mux.HandleFunc("/install.sh", handleInstallScript)
 
@@ -911,6 +949,18 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 func requireCloudAdmin(w http.ResponseWriter, r *http.Request) bool {
 	identity, ok := AuthIdentityFromContext(r.Context())
 	if !ok || !isCloudAdminIdentity(identity) {
+		writeError(w, ErrForbidden)
+		return false
+	}
+	return true
+}
+
+func requireQueryModelDownloadPermission(w http.ResponseWriter, r *http.Request) bool {
+	if ProductModeFromEnv() != ProductModeCloud {
+		return true
+	}
+	identity, ok := AuthIdentityFromContext(r.Context())
+	if !ok || !isCloudAdminSubjectIdentity(identity) {
 		writeError(w, ErrForbidden)
 		return false
 	}

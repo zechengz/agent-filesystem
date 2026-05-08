@@ -306,14 +306,16 @@ Use `file_query` when exact text is unknown or typed `lex:`, `vec:`, and
 keyword-ranked results until hybrid vector/rerank is complete. Keyword ranking
 uses Redis Search BM25 over query chunks when available, then falls back to
 direct content ranking. Use `mode=semantic` only when vector-only retrieval is
-required. Semantic embeddings are globally enabled and currently use OpenAI
-when `OPENAI_API_KEY` is present in the control-plane environment. The default
-model is `openai:text-embedding-3-small`, overrideable with `AFS_EMBED_MODEL`
-in that same environment; restart the control plane after changing it. Redis
-vector KNN is used when available, with direct vector ranking as its fallback.
+required. Semantic embeddings are globally enabled and default to OpenAI when
+`OPENAI_API_KEY` is set in the control-plane environment. Local GGUF is
+available as an explicit provider with `AFS_EMBED_PROVIDER=local`; for that
+path, `afs query model download` asks the control plane helper to resolve,
+download, and load the model server-side and is admin-only on AFS Cloud. Redis vector KNN is
+used when available, with direct vector ranking as its fallback.
 Semantic queries read existing embeddings; imports create embeddings in the
 background, and existing workspaces should be prepared through the query index
-creation flow before relying on `mode=semantic`.
+creation flow before
+relying on `mode=semantic`.
 
 ## File Write Tools
 

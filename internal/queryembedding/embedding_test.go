@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -134,6 +136,67 @@ func TestNewProviderFromEnvRequiresOpenAIKey(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "OPENAI_API_KEY") {
 		t.Fatalf("error = %q, want OPENAI_API_KEY guidance", err)
+	}
+}
+
+func TestNewProviderFromEnvInfersLocalGGUFModel(t *testing.T) {
+	t.Setenv("AFS_EMBED_PROVIDER", "")
+	t.Setenv("AFS_EMBED_MODEL_DIR", t.TempDir())
+	t.Setenv(localHelperCommandEnv, filepath.Join(t.TempDir(), "missing-node"))
+	_, err := NewProviderFromEnv(DefaultLocalModel)
+	if err == nil {
+		t.Fatal("NewProviderFromEnv() returned nil error, want local runtime unavailable")
+	}
+	if !strings.Contains(err.Error(), "local embedding helper runtime") {
+		t.Fatalf("error = %q, want local GGUF guidance", err)
+	}
+}
+
+func TestNewProviderFromEnvUsesLocalGGUFRuntime(t *testing.T) {
+	cacheDir := t.TempDir()
+	runtimePath := filepath.Join(t.TempDir(), "afs-fake-embedding-helper")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"op":"ready"'*) printf '%s\n' '{"id":0}' ;;
+    *) printf '%s\n' '{"id":1,"vectors":[[3,4,0]]}' ;;
+  esac
+done
+`
+	if err := os.WriteFile(runtimePath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile(runtime) returned error: %v", err)
+	}
+	t.Setenv("AFS_EMBED_PROVIDER", "")
+	t.Setenv("AFS_EMBED_MODEL_DIR", cacheDir)
+	t.Setenv("AFS_EMBED_DIMENSIONS", "3")
+	t.Setenv(localHelperCommandEnv, runtimePath)
+
+	provider, err := NewProviderFromEnv(DefaultLocalModel)
+	if err != nil {
+		t.Fatalf("NewProviderFromEnv(local) returned error: %v", err)
+	}
+	if provider.Name() != "local" || provider.Model() != DefaultLocalModel || provider.Dimension() != 3 {
+		t.Fatalf("provider = %s %s %d, want local %s 3", provider.Name(), provider.Model(), provider.Dimension(), DefaultLocalModel)
+	}
+	vec, err := provider.Embed(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("Embed(local) returned error: %v", err)
+	}
+	if len(vec) != 3 || vec[0] <= 0.59 || vec[1] <= 0.79 || vec[2] != 0 {
+		t.Fatalf("vec = %#v, want normalized fake runtime output", vec)
+	}
+}
+
+func TestParseLocalModelSpecDefaultsToEmbeddingGemmaGGUF(t *testing.T) {
+	spec, err := ParseLocalModelSpec("")
+	if err != nil {
+		t.Fatalf("ParseLocalModelSpec() returned error: %v", err)
+	}
+	if spec.ID != DefaultLocalModel ||
+		spec.Repo != "ggml-org/embeddinggemma-300M-GGUF" ||
+		spec.Filename != "embeddinggemma-300M-Q8_0.gguf" ||
+		!strings.Contains(spec.URL, "/ggml-org/embeddinggemma-300M-GGUF/resolve/main/embeddinggemma-300M-Q8_0.gguf") {
+		t.Fatalf("spec = %+v, want default embeddinggemma GGUF", spec)
 	}
 }
 

@@ -1,11 +1,15 @@
 package controlplane
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"strconv"
 	"testing"
 )
 
@@ -127,6 +131,116 @@ func TestCloudAdminEndpointsRejectNonAdmin(t *testing.T) {
 	}
 	if config.User != nil && config.User.IsAdmin {
 		t.Fatalf("regular user auth config = %#v, want non-admin", config.User)
+	}
+}
+
+func TestCloudQueryModelDownloadRequiresAdminAndAllowsAdminCLIToken(t *testing.T) {
+	t.Setenv(ProductModeEnvVar, ProductModeCloud)
+	t.Setenv(authAdminSubjectsEnvVar, "admin-user")
+	cacheDir := t.TempDir()
+	t.Setenv("AFS_EMBED_MODEL_DIR", cacheDir)
+
+	payload := []byte("tiny gguf")
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/model.gguf" {
+			t.Fatalf("model path = %q, want /model.gguf", r.URL.Path)
+		}
+		_, _ = w.Write(payload)
+	}))
+	defer modelServer.Close()
+	fakeModelPath := cacheDir + "/fake-model.gguf"
+	if err := os.WriteFile(fakeModelPath, payload, 0o644); err != nil {
+		t.Fatalf("WriteFile(fake model) returned error: %v", err)
+	}
+	helperPath := cacheDir + "/fake-helper"
+	helperScript := `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"op":"ready"'*) printf '{"id":0,"path":"%s"}\n' "$FAKE_EMBED_MODEL_PATH" ;;
+    *) printf '%s\n' '{"id":1,"vectors":[[1,0,0]]}' ;;
+  esac
+done
+`
+	if err := os.WriteFile(helperPath, []byte(helperScript), 0o755); err != nil {
+		t.Fatalf("WriteFile(fake helper) returned error: %v", err)
+	}
+	t.Setenv("AFS_EMBED_HELPER_CMD", helperPath)
+	t.Setenv("AFS_EMBED_DIMENSIONS", "3")
+	t.Setenv("FAKE_EMBED_MODEL_PATH", fakeModelPath)
+
+	manager, databaseID := newTestManager(t)
+	adminCtx := context.WithValue(context.Background(), authIdentityContextKey, AuthIdentity{
+		Subject:  "admin-user",
+		Name:     "Admin",
+		Provider: string(AuthModeTrustedHeader),
+	})
+	adminWorkspace, err := manager.CreateWorkspace(adminCtx, databaseID, createWorkspaceRequest{
+		Name:   "admin-repo",
+		Source: sourceRef{Kind: SourceBlank},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace(admin) returned error: %v", err)
+	}
+	adminToken, err := manager.createCLIAccessTokenRecord(context.Background(), "admin-user", "Admin", databaseID, adminWorkspace.ID, adminWorkspace.Name)
+	if err != nil {
+		t.Fatalf("createCLIAccessTokenRecord(admin) returned error: %v", err)
+	}
+	auth := newTrustedHeaderTestAuth(t)
+	server := httptest.NewServer(NewHandlerWithOptions(manager, HandlerOptions{
+		AllowOrigin: "*",
+		Auth:        auth,
+	}))
+	defer server.Close()
+
+	statusReq, err := http.NewRequest(http.MethodGet, server.URL+"/v1/query/model/status?model="+url.QueryEscape(modelServer.URL+"/model.gguf"), nil)
+	if err != nil {
+		t.Fatalf("NewRequest(status) returned error: %v", err)
+	}
+	statusReq.Header.Set("X-Forwarded-User", "regular-user")
+	statusResp, err := http.DefaultClient.Do(statusReq)
+	if err != nil {
+		t.Fatalf("GET query model status returned error: %v", err)
+	}
+	_ = statusResp.Body.Close()
+	if statusResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET query model status = %d, want %d", statusResp.StatusCode, http.StatusOK)
+	}
+
+	body := []byte(`{"model":` + strconv.Quote(modelServer.URL+"/model.gguf") + `}`)
+	regularReq, err := http.NewRequest(http.MethodPost, server.URL+"/v1/query/model/download", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest(regular download) returned error: %v", err)
+	}
+	regularReq.Header.Set("X-Forwarded-User", "regular-user")
+	regularResp, err := http.DefaultClient.Do(regularReq)
+	if err != nil {
+		t.Fatalf("POST regular query model download returned error: %v", err)
+	}
+	_ = regularResp.Body.Close()
+	if regularResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("POST regular query model download = %d, want %d", regularResp.StatusCode, http.StatusForbidden)
+	}
+
+	adminReq, err := http.NewRequest(http.MethodPost, server.URL+"/v1/query/model/download", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest(admin download) returned error: %v", err)
+	}
+	adminReq.Header.Set("Authorization", "Bearer "+adminToken)
+	adminResp, err := http.DefaultClient.Do(adminReq)
+	if err != nil {
+		t.Fatalf("POST admin query model download returned error: %v", err)
+	}
+	defer adminResp.Body.Close()
+	if adminResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(adminResp.Body)
+		t.Fatalf("POST admin query model download = %d, want %d, body=%s", adminResp.StatusCode, http.StatusOK, body)
+	}
+	var result QueryModelDownloadResult
+	if err := json.NewDecoder(adminResp.Body).Decode(&result); err != nil {
+		t.Fatalf("Decode(query model download) returned error: %v", err)
+	}
+	if !result.Exists || result.Path != fakeModelPath {
+		t.Fatalf("download result = %+v, want helper-resolved cached model", result)
 	}
 }
 

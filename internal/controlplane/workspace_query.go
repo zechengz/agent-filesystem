@@ -274,11 +274,17 @@ func queryEmbeddingConfiguredProviderModel() (string, string) {
 	if strings.HasPrefix(strings.ToLower(model), "openai:") {
 		provider = "openai"
 	}
+	if strings.HasPrefix(strings.ToLower(model), "hf:") || strings.HasPrefix(strings.ToLower(model), "local:") {
+		provider = "local"
+	}
 	if provider == "" {
 		provider = queryembedding.DefaultProvider
 	}
 	if model == "" && provider == "openai" {
 		model = "openai:" + queryembedding.DefaultOpenAIModel
+	}
+	if model == "" && provider == "local" {
+		model = queryembedding.DefaultLocalModel
 	}
 	if provider == "openai" && model != "" && !strings.HasPrefix(strings.ToLower(model), "openai:") {
 		model = "openai:" + model

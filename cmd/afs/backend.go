@@ -144,6 +144,8 @@ type afsControlPlane interface {
 	QueryWorkspace(ctx context.Context, workspace string, request mcptools.FileQueryRequest) (mcptools.FileQueryResponse, error)
 	QueryIndexStatus(ctx context.Context, workspace string, request controlplane.WorkspaceQueryIndexStatusRequest) (controlplane.WorkspaceQueryIndexStatus, error)
 	RebuildQueryIndex(ctx context.Context, workspace string, request controlplane.WorkspaceQueryIndexRebuildRequest) (controlplane.WorkspaceQueryIndexRebuildResponse, error)
+	QueryModelStatus(ctx context.Context, request controlplane.QueryModelStatusRequest) (controlplane.QueryModelStatus, error)
+	DownloadQueryModel(ctx context.Context, request controlplane.QueryModelDownloadRequest) (controlplane.QueryModelDownloadResult, error)
 	DiffWorkspace(ctx context.Context, workspace, baseView, headView string) (controlplane.WorkspaceDiffResponse, error)
 	RestoreCheckpoint(ctx context.Context, workspace, checkpointID string) error
 	SaveCheckpoint(ctx context.Context, input controlplane.SaveCheckpointRequest) (bool, error)

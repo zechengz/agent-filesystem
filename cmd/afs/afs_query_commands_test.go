@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -124,6 +125,40 @@ func TestWorkspaceQueryIndexInvocationIncludesCreate(t *testing.T) {
 	}
 }
 
+func TestWorkspaceQueryModelInvocationAndStatus(t *testing.T) {
+	for _, args := range [][]string{
+		{"model"},
+		{"model", "status"},
+		{"model", "download"},
+	} {
+		if !isWorkspaceQueryModelInvocation(args) {
+			t.Fatalf("isWorkspaceQueryModelInvocation(%#v) = false, want true", args)
+		}
+	}
+	if isWorkspaceQueryModelInvocation([]string{"model", "files"}) {
+		t.Fatal("isWorkspaceQueryModelInvocation(model files) = true, want natural query")
+	}
+
+	_, _, closeStore := setupAFSGrepTest(t)
+	defer closeStore()
+	t.Setenv("AFS_EMBED_MODEL_DIR", t.TempDir())
+	output, err := captureStdout(t, func() error {
+		return cmdQuery([]string{"query", "model", "status"})
+	})
+	if err != nil {
+		t.Fatalf("cmdQuery(model status) returned error: %v", err)
+	}
+	for _, want := range []string{
+		"Query model",
+		"hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf",
+		"downloaded false",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output = %q, missing %q", output, want)
+		}
+	}
+}
+
 func TestParseWorkspaceQueryArgsRejectsModeFlagsWithTypedDocuments(t *testing.T) {
 	_, err := parseWorkspaceQueryArgs(mcptools.FileQueryModeHybrid, []string{
 		"--semantic",
@@ -151,8 +186,9 @@ func TestParseWorkspaceQueryArgsRejectsKeywordAndSemanticTogether(t *testing.T) 
 	}
 }
 
-func TestCmdQuerySemanticMissingKeyFailsClearly(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "")
+func TestCmdQuerySemanticMissingLocalHelperFailsClearly(t *testing.T) {
+	t.Setenv("AFS_EMBED_PROVIDER", "local")
+	t.Setenv("AFS_EMBED_HELPER_CMD", filepath.Join(t.TempDir(), "missing-node"))
 	_, _, closeStore := setupAFSGrepTest(t)
 	defer closeStore()
 
@@ -162,8 +198,8 @@ func TestCmdQuerySemanticMissingKeyFailsClearly(t *testing.T) {
 	if err == nil {
 		t.Fatal("cmdQuery(--semantic) returned nil error, want unavailable")
 	}
-	if !strings.Contains(err.Error(), "OPENAI_API_KEY") {
-		t.Fatalf("error = %q, want OPENAI_API_KEY guidance", err)
+	if !strings.Contains(err.Error(), "local embedding helper runtime") {
+		t.Fatalf("error = %q, want local helper guidance", err)
 	}
 }
 
@@ -643,7 +679,7 @@ func TestCmdQueryIndexStatusReportsGlobalEmbeddingStatus(t *testing.T) {
 	if status.Workspace != "repo" || status.Keyword.Files != 0 {
 		t.Fatalf("status = %+v, want empty repo keyword status", status)
 	}
-	if !status.Embeddings.Enabled || status.Embeddings.Model != "openai:text-embedding-3-small" || status.Embeddings.Available {
+	if !status.Embeddings.Enabled || status.Embeddings.Provider != "openai" || status.Embeddings.Model != "openai:text-embedding-3-small" || status.Embeddings.Available {
 		t.Fatalf("embedding status = %+v, want global OpenAI unavailable without key", status)
 	}
 }
@@ -844,6 +880,7 @@ func TestCmdQueryContractCoversHybridFallbacksAndIndexDisambiguation(t *testing.
 	})
 
 	t.Run("semantic JSON reports unavailable without failing command", func(t *testing.T) {
+		t.Setenv("AFS_EMBED_PROVIDER", "")
 		t.Setenv("OPENAI_API_KEY", "")
 		output, err := captureStdout(t, func() error {
 			return cmdQuery([]string{"query", "--semantic", "--json", "workspace recovery"})

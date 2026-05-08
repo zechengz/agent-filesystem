@@ -75,3 +75,11 @@ embedding controls, and reports missing provider credentials through query
 index status without hard-failing semantic query commands. Removed stale
 top-level workspace-scoped embedding status fields so provider/model appear
 only under the global `embeddings` status object.
+Added the first local-model slice: `afs query model status/download` manages a
+global pure GGUF model cache for
+`hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf`.
+The download command runs on the control plane, is admin-only on AFS Cloud, and
+warms the same managed Node helper used for embedding. Runtime GGUF inference
+uses `node-llama-cpp`, matching QMD's model lifecycle; the implementation
+intentionally does not use Ollama or per-call `llama-embedding` process
+invocations.

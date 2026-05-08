@@ -225,13 +225,17 @@ back to keyword-ranked results until hybrid vector/rerank is complete. Keyword
 ranking uses Redis Search BM25 over query chunks when available, then falls
 back to direct content ranking. Use `query --keyword` for keyword-only ranking.
 Use `query --semantic` when you specifically need vector-only retrieval.
-Semantic embeddings are globally enabled and currently use OpenAI when
-`OPENAI_API_KEY` is present in the control-plane environment. The default model
-is `openai:text-embedding-3-small`, overrideable with `AFS_EMBED_MODEL` in that
-same environment; restart the control plane after changing it. Redis vector KNN
-is used when available, with direct vector ranking as its fallback. Semantic
-queries read existing embeddings; imports create embeddings in the background,
-and existing workspaces can be prepared with
+Semantic embeddings are globally enabled and default to OpenAI when
+`OPENAI_API_KEY` is set in the control-plane environment. Local GGUF is
+available as an explicit provider with `AFS_EMBED_PROVIDER=local`. For that
+path, `afs query model download` asks the control plane helper to resolve,
+download, and load the model server-side. On AFS Cloud, only an admin identity
+can trigger that warm-up. The default local model is
+`hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf`. Redis
+vector KNN is used when available, with direct vector ranking as its fallback.
+Semantic queries read
+existing embeddings; imports create embeddings in the background, and existing
+workspaces can be prepared with
 `afs fs <workspace> query index create --embeddings --wait`.
 
 `query --files`, `query --csv`, `query --md`, and `query --xml` provide

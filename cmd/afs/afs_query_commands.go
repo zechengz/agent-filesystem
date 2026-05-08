@@ -68,6 +68,9 @@ func runWorkspaceQuery(mode, workspace string, args []string) error {
 	if mode == mcptools.FileQueryModeHybrid && isWorkspaceQueryIndexInvocation(args) {
 		return runWorkspaceQueryIndex(workspace, args[1:])
 	}
+	if mode == mcptools.FileQueryModeHybrid && workspace == "" && isWorkspaceQueryModelInvocation(args) {
+		return runWorkspaceQueryModel(args[1:])
+	}
 	opts, err := parseWorkspaceQueryArgs(mode, args)
 	if err != nil {
 		return err
@@ -82,6 +85,121 @@ func runWorkspaceQuery(mode, workspace string, args []string) error {
 
 	request := workspaceQueryRequest(remote.selection, opts)
 	return runWorkspaceQueryRequest(ctx, remote, opts, request)
+}
+
+func isWorkspaceQueryModelInvocation(args []string) bool {
+	if len(args) == 0 || args[0] != "model" {
+		return false
+	}
+	if len(args) == 1 || isHelpArg(args[1]) {
+		return true
+	}
+	switch strings.TrimSpace(args[1]) {
+	case "status", "download":
+		return true
+	default:
+		return false
+	}
+}
+
+func runWorkspaceQueryModel(args []string) error {
+	if len(args) == 0 || isHelpArg(args[0]) {
+		fmt.Fprint(os.Stderr, workspaceQueryModelUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+	switch strings.TrimSpace(args[0]) {
+	case "status":
+		return runWorkspaceQueryModelStatus(args[1:])
+	case "download":
+		return runWorkspaceQueryModelDownload(args[1:])
+	default:
+		return fmt.Errorf("unknown query model subcommand %q\n\n%s", args[0], workspaceQueryModelUsageText(filepath.Base(os.Args[0])))
+	}
+}
+
+func runWorkspaceQueryModelStatus(args []string) error {
+	fs := flag.NewFlagSet("query model status", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var jsonOut bool
+	var model string
+	fs.BoolVar(&jsonOut, "json", false, "write JSON output")
+	fs.StringVar(&model, "model", "", "local model id")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return fmt.Errorf("%s", workspaceQueryModelUsageText(filepath.Base(os.Args[0])))
+	}
+	ctx := context.Background()
+	_, service, closeFn, err := openAFSControlPlane(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	status, err := service.QueryModelStatus(ctx, controlplane.QueryModelStatusRequest{Model: model})
+	if err != nil {
+		return workspaceQueryModelControlPlaneError(err)
+	}
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(status)
+	}
+	fmt.Fprintln(os.Stdout, "Query model")
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "model      %s\n", status.Spec.ID)
+	fmt.Fprintf(os.Stdout, "cache_dir  %s\n", status.CacheDir)
+	fmt.Fprintf(os.Stdout, "path       %s\n", status.Path)
+	fmt.Fprintf(os.Stdout, "downloaded %t\n", status.Exists)
+	if status.SizeBytes > 0 {
+		fmt.Fprintf(os.Stdout, "size       %s\n", formatBytes(status.SizeBytes))
+	}
+	return nil
+}
+
+func runWorkspaceQueryModelDownload(args []string) error {
+	fs := flag.NewFlagSet("query model download", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var jsonOut bool
+	var model string
+	fs.BoolVar(&jsonOut, "json", false, "write JSON output")
+	fs.StringVar(&model, "model", "", "local model id")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return fmt.Errorf("%s", workspaceQueryModelUsageText(filepath.Base(os.Args[0])))
+	}
+	ctx := context.Background()
+	_, service, closeFn, err := openAFSControlPlane(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	if !jsonOut {
+		fmt.Fprintln(os.Stderr, "Resolving local embedding model on the control plane...")
+	}
+	result, err := service.DownloadQueryModel(ctx, controlplane.QueryModelDownloadRequest{Model: model})
+	if err != nil {
+		return workspaceQueryModelControlPlaneError(err)
+	}
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+	fmt.Fprintln(os.Stdout, "Query model")
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "model      %s\n", result.Spec.ID)
+	fmt.Fprintf(os.Stdout, "cache_dir  %s\n", result.CacheDir)
+	fmt.Fprintf(os.Stdout, "path       %s\n", result.Path)
+	fmt.Fprintf(os.Stdout, "cached     %t\n", result.Exists)
+	fmt.Fprintf(os.Stdout, "resolved   %t\n", result.Downloaded || result.Exists)
+	if result.SizeBytes > 0 {
+		fmt.Fprintf(os.Stdout, "size       %s\n", formatBytes(result.SizeBytes))
+	}
+	return nil
+}
+
+func workspaceQueryModelControlPlaneError(err error) error {
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("query model routes are not available on this control plane; rebuild and restart afs-control-plane")
+	}
+	return err
 }
 
 func isWorkspaceQueryIndexInvocation(args []string) bool {
@@ -726,7 +844,8 @@ func workspaceQueryUsageText(bin, mode string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s query [flags] <query>
   %s fs [workspace] query [flags] <query>
-  %s query index <status|rebuild|clean> [flags]
+  %s query index <status|create|rebuild|clean> [flags]
+  %s query model <status|download> [flags]
 
 QMD-style hybrid + rerank workspace query.
 Plain text runs hybrid retrieval by default. Use --keyword for keyword-ranked
@@ -734,8 +853,9 @@ retrieval only, or --semantic for vector-only semantic search.
 
 Default query currently falls back to keyword ranked results until hybrid
 vector/rerank is complete. Use --semantic for vector-only retrieval. Semantic
-embeddings are globally enabled and use OpenAI when OPENAI_API_KEY is set in
-the control-plane environment.
+embeddings are globally enabled and default to OpenAI when OPENAI_API_KEY is set
+in the control-plane environment. Set AFS_EMBED_PROVIDER=local to use the local
+GGUF helper.
 Use grep when you know the exact text.
 
 Typed query documents:
@@ -770,6 +890,33 @@ Examples:
   %s query --keyword "checkpoint savepoint"
   %s query --semantic "how do I save a snapshot?"
   %s query index status
+  %s query model download
   %s fs repo query $'lex: checkpoint\nvec: how do I save a snapshot?'
-`, bin, bin, bin, bin, bin, bin, bin, bin)
+`, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin)
+}
+
+func workspaceQueryModelUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %[1]s query model <status|download> [flags]
+
+Manage the control-plane global local GGUF embedding model cache.
+
+Subcommands:
+  status             Show the configured local model and expected cache path
+  download           Ask the Node helper to resolve/download/load the model now
+
+Flags:
+  --model <model>    Model id, default hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf
+  --json             Write JSON output
+
+Environment:
+  AFS_EMBED_MODEL_DIR   Control-plane cache directory override
+  AFS_EMBED_HELPER_CMD  Control-plane Node.js command override
+  AFS_NODE_LLAMA_CPP_MODULE
+                        node-llama-cpp module specifier override
+
+Examples:
+  %[1]s query model status
+  %[1]s query model download
+`, bin)
 }

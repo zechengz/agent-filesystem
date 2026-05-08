@@ -39,12 +39,21 @@ func isCloudAdminIdentity(identity AuthIdentity) bool {
 	if ProductModeFromEnv() != ProductModeCloud {
 		return false
 	}
+	if strings.TrimSpace(identity.Provider) == "cli-token" || strings.TrimSpace(identity.Provider) == "mcp-token" {
+		return false
+	}
+	return isCloudAdminSubjectIdentity(identity)
+}
+
+func isCloudAdminSubjectIdentity(identity AuthIdentity) bool {
+	if ProductModeFromEnv() != ProductModeCloud {
+		return false
+	}
 	subject := strings.TrimSpace(identity.Subject)
 	if subject == "" {
 		return false
 	}
-	switch strings.TrimSpace(identity.Provider) {
-	case "cli-token", "mcp-token":
+	if strings.TrimSpace(identity.Provider) == "mcp-token" {
 		return false
 	}
 	for _, candidate := range splitHeaderValues(os.Getenv(authAdminSubjectsEnvVar)) {

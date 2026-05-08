@@ -113,6 +113,9 @@ func NewProvider(cfg ProviderConfig) (Provider, error) {
 		provider = "openai"
 		model = strings.TrimSpace(model[len("openai:"):])
 	}
+	if strings.HasPrefix(strings.ToLower(model), "hf:") || strings.HasPrefix(strings.ToLower(model), "local:") {
+		provider = "local"
+	}
 	if provider == "" {
 		provider = DefaultProvider
 	}
@@ -132,7 +135,13 @@ func NewProvider(cfg ProviderConfig) (Provider, error) {
 			HTTPClient: cfg.HTTPClient,
 		})
 	case "local":
-		return nil, fmt.Errorf("%w: local GGUF embeddings are not wired into AFS yet; use AFS_EMBED_PROVIDER=openai with OPENAI_API_KEY", ErrUnavailable)
+		if model == "" {
+			model = DefaultLocalModel
+		}
+		return NewLocalGGUFProvider(LocalGGUFConfig{
+			Model:      model,
+			Dimensions: cfg.Dimensions,
+		})
 	case "test":
 		return NewTestProvider(model), nil
 	default:

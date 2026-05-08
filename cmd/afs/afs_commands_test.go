@@ -138,6 +138,14 @@ func (s stubAFSControlPlane) RebuildQueryIndex(context.Context, string, controlp
 	return controlplane.WorkspaceQueryIndexRebuildResponse{}, fmt.Errorf("unexpected RebuildQueryIndex call")
 }
 
+func (s stubAFSControlPlane) QueryModelStatus(context.Context, controlplane.QueryModelStatusRequest) (controlplane.QueryModelStatus, error) {
+	return controlplane.QueryModelStatus{}, fmt.Errorf("unexpected QueryModelStatus call")
+}
+
+func (s stubAFSControlPlane) DownloadQueryModel(context.Context, controlplane.QueryModelDownloadRequest) (controlplane.QueryModelDownloadResult, error) {
+	return controlplane.QueryModelDownloadResult{}, fmt.Errorf("unexpected DownloadQueryModel call")
+}
+
 func (s stubAFSControlPlane) DiffWorkspace(context.Context, string, string, string) (controlplane.WorkspaceDiffResponse, error) {
 	return controlplane.WorkspaceDiffResponse{}, fmt.Errorf("unexpected DiffWorkspace call")
 }

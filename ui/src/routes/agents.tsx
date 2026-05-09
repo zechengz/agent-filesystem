@@ -14,6 +14,7 @@ import {
   Tabs,
 } from "../components/afs-kit";
 import { AgentSetupGuide } from "../features/agents/AgentSetupGuide";
+import { AgentProfilesTab } from "../features/agents/profiles/AgentProfilesTab";
 import { useAuthSession } from "../foundation/auth-context";
 import { useDatabaseScope } from "../foundation/database-scope";
 import {
@@ -28,12 +29,12 @@ import type {
   AFSAgentSession,
 } from "../foundation/types/afs";
 
-type AgentsTab = "active" | "history";
+type AgentsTab = "profiles" | "active" | "history";
 
 const agentsSearchSchema = z.object({
   workspaceId: z.string().optional(),
   databaseId: z.string().optional(),
-  tab: z.enum(["active", "history"]).optional(),
+  tab: z.enum(["profiles", "active", "history"]).optional(),
 });
 
 export const Route = createFileRoute("/agents")({
@@ -46,7 +47,8 @@ function AgentsPage() {
   const auth = useAuthSession();
   const search = Route.useSearch();
   const { unavailableDatabases } = useDatabaseScope();
-  const queriesEnabled = !auth.isLoading && (!auth.config.enabled || auth.isAuthenticated);
+  const queriesEnabled =
+    !auth.isLoading && (!auth.config.enabled || auth.isAuthenticated);
   const agentsQuery = useAgents(null, queriesEnabled);
   const activityQuery = useActivity(search.databaseId ?? null, 100, queriesEnabled);
   const workspacesQuery = useWorkspaceSummaries(null, queriesEnabled);
@@ -77,7 +79,11 @@ function AgentsPage() {
       }
       return true;
     })
-    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+    .sort(
+      (left, right) =>
+        new Date(right.createdAt).getTime() -
+        new Date(left.createdAt).getTime(),
+    );
 
   const isFiltered = workspaceId != null || databaseId != null;
 
@@ -120,7 +126,27 @@ function AgentsPage() {
     return <Loader data-testid="loader--spinner" />;
   }
 
-  if (tab === "active" && currentConnections.length === 0 && connectionHistory.length === 0 && !isFiltered && !agentsQuery.isError) {
+  const tabs = (
+    <Tabs>
+      <TabButton $active={tab === "profiles"} onClick={() => setTab("profiles")}>
+        Profiles
+      </TabButton>
+      <TabButton $active={tab === "active"} onClick={() => setTab("active")}>
+        Active Agents
+      </TabButton>
+      <TabButton $active={tab === "history"} onClick={() => setTab("history")}>
+        Connection History
+      </TabButton>
+    </Tabs>
+  );
+
+  if (
+    tab === "active" &&
+    currentConnections.length === 0 &&
+    connectionHistory.length === 0 &&
+    !isFiltered &&
+    !agentsQuery.isError
+  ) {
     return (
       <PageStack>
         {unavailableDatabases.length > 0 ? (
@@ -128,18 +154,14 @@ function AgentsPage() {
             <NoticeTitle>Some databases are unavailable</NoticeTitle>
             <NoticeBody>
               Connected-agent results are partial while these databases are disconnected:{" "}
-              {unavailableDatabases.map((database) => database.displayName || database.databaseName).join(", ")}.
+              {unavailableDatabases
+                .map((database) => database.displayName || database.databaseName)
+                .join(", ")}
+              .
             </NoticeBody>
           </NoticeCard>
         ) : null}
-        <Tabs>
-          <TabButton $active onClick={() => setTab("active")}>
-            Active Agents
-          </TabButton>
-          <TabButton $active={false} onClick={() => setTab("history")}>
-            Connection History
-          </TabButton>
-        </Tabs>
+        {tabs}
         <AgentsEmptyState />
       </PageStack>
     );
@@ -152,21 +174,17 @@ function AgentsPage() {
           <NoticeTitle>Some databases are unavailable</NoticeTitle>
           <NoticeBody>
             Agent results are partial while these databases are disconnected:{" "}
-            {unavailableDatabases.map((database) => database.displayName || database.databaseName).join(", ")}.
+            {unavailableDatabases
+              .map((database) => database.displayName || database.databaseName)
+              .join(", ")}
+            .
           </NoticeBody>
         </NoticeCard>
       ) : null}
 
-      <Tabs>
-        <TabButton $active={tab === "active"} onClick={() => setTab("active")}>
-          Active Agents
-        </TabButton>
-        <TabButton $active={tab === "history"} onClick={() => setTab("history")}>
-          Connection History
-        </TabButton>
-      </Tabs>
+      {tabs}
 
-      {isFiltered ? (
+      {isFiltered && tab !== "profiles" ? (
         <InlineActions>
           <Button
             kind="ghost"
@@ -182,6 +200,8 @@ function AgentsPage() {
           </Button>
         </InlineActions>
       ) : null}
+
+      {tab === "profiles" ? <AgentProfilesTab /> : null}
 
       {tab === "active" ? (
         <AgentsTable
@@ -204,7 +224,11 @@ function AgentsPage() {
               rows={connectionHistory}
               loading={activityQuery.isLoading}
               error={activityQuery.isError}
-              errorMessage={activityQuery.error instanceof Error ? activityQuery.error.message : undefined}
+              errorMessage={
+                activityQuery.error instanceof Error
+                  ? activityQuery.error.message
+                  : undefined
+              }
               hideTypeColumn
               onOpenActivity={openActivity}
             />
@@ -221,7 +245,12 @@ function AgentsEmptyState() {
       <EmptyHeader>
         <EmptyIcon>
           <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-            <rect width="48" height="48" rx="14" fill="var(--afs-accent-soft, rgba(37,99,235,0.1))" />
+            <rect
+              width="48"
+              height="48"
+              rx="14"
+              fill="var(--afs-accent-soft, rgba(37,99,235,0.1))"
+            />
             <path
               d="M24 14v4m0 12v4m-10-10h4m12 0h4m-14.24-7.07 2.83 2.83m9.65 9.65 2.83 2.83m0-15.31-2.83 2.83m-9.65 9.65-2.83 2.83"
               stroke="var(--afs-accent, #2563eb)"
@@ -232,7 +261,8 @@ function AgentsEmptyState() {
         </EmptyIcon>
         <EmptyTitle>No agents connected</EmptyTitle>
         <EmptyDesc>
-          Connect an agent to start working with your workspaces. Agents sync files to Redis automatically and appear here in real time.
+          Connect an agent to start working with your workspaces. Agents sync
+          files to Redis automatically and appear here in real time.
         </EmptyDesc>
       </EmptyHeader>
       <AgentSetupGuide compact />

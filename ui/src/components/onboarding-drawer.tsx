@@ -9,34 +9,17 @@
 
 import { Link } from "@tanstack/react-router";
 import { Check, Copy } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import type { ReactNode } from "react";
-import styled, { keyframes } from "styled-components";
+import styled from "styled-components";
 import { SurfaceCard } from "./card-shell";
 import { AgentPromptCard } from "./agent-prompt-card";
+import { Drawer } from "./drawer";
 import {
   agentBootstrapPrompt,
   agentMcpPrompt,
 } from "../features/docs/afs-samples";
 import type { DrawerCommandSection } from "../foundation/drawer-context";
-
-// Slide animation timing — keep in sync with the CSS @keyframes durations
-// on Backdrop and DrawerShell below.
-const SLIDE_MS = 220;
-
-// Drives the open/close animation. CSS keyframes play automatically on
-// mount (slide-in). On close request, flip `closing` to play the reverse
-// keyframes; after SLIDE_MS we call the parent's onClose to unmount.
-function useDrawerAnimation(onCloseParent: () => void) {
-  const [closing, setClosing] = useState(false);
-
-  const handleClose = useCallback(() => {
-    setClosing(true);
-    window.setTimeout(onCloseParent, SLIDE_MS);
-  }, [onCloseParent]);
-
-  return { closing, handleClose };
-}
 
 export type OnboardingPath = "agent" | "cli";
 
@@ -59,17 +42,6 @@ export function OnboardingDrawer({
   onClose,
   onRetry,
 }: Props) {
-  const { closing, handleClose } = useDrawerAnimation(onClose);
-
-  // Close on Escape — matches the close X in the header.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") handleClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [handleClose]);
-
   const headerTitle =
     path === "agent" ? "Connect your agent" : "Connect via CLI";
   const headerSubline =
@@ -78,40 +50,36 @@ export function OnboardingDrawer({
       : "Install the CLI, authenticate, and mount the workspace from your shell.";
 
   return (
-    <Backdrop $closing={closing} onClick={handleClose} role="presentation">
-      <DrawerShell
-        $closing={closing}
-        role="dialog"
-        aria-modal="true"
-        aria-label={headerTitle}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <DrawerHeader>
-          <DrawerTitleStack>
-            <DrawerEyebrow>Quick start</DrawerEyebrow>
-            <DrawerTitle>{headerTitle}</DrawerTitle>
-            <DrawerSubline>{headerSubline}</DrawerSubline>
-          </DrawerTitleStack>
-          <CloseButton type="button" onClick={handleClose} aria-label="Close">
-            ×
-          </CloseButton>
-        </DrawerHeader>
+    <Drawer onClose={onClose} ariaLabel={headerTitle}>
+      {({ requestClose }) => (
+        <>
+          <DrawerHeader>
+            <DrawerTitleStack>
+              <DrawerEyebrow>Quick start</DrawerEyebrow>
+              <DrawerTitle>{headerTitle}</DrawerTitle>
+              <DrawerSubline>{headerSubline}</DrawerSubline>
+            </DrawerTitleStack>
+            <CloseButton type="button" onClick={requestClose} aria-label="Close">
+              ×
+            </CloseButton>
+          </DrawerHeader>
 
-        <DrawerBody>
-          <StatusChip
-            status={status}
-            workspaceName={workspaceName}
-            errorMessage={errorMessage}
-            onRetry={onRetry}
-          />
-          {path === "agent" ? (
-            <AgentBody />
-          ) : (
-            <CliBody workspaceName={workspaceName} />
-          )}
-        </DrawerBody>
-      </DrawerShell>
-    </Backdrop>
+          <DrawerBody>
+            <StatusChip
+              status={status}
+              workspaceName={workspaceName}
+              errorMessage={errorMessage}
+              onRetry={onRetry}
+            />
+            {path === "agent" ? (
+              <AgentBody />
+            ) : (
+              <CliBody workspaceName={workspaceName} />
+            )}
+          </DrawerBody>
+        </>
+      )}
+    </Drawer>
   );
 }
 
@@ -302,50 +270,6 @@ function StatusChip({
 }
 
 // ─── Styled components ───────────────────────────────────────────────
-
-const fadeIn = keyframes`
-  from { background: rgba(8, 6, 13, 0); }
-  to { background: rgba(8, 6, 13, 0.42); }
-`;
-
-const fadeOut = keyframes`
-  from { background: rgba(8, 6, 13, 0.42); }
-  to { background: rgba(8, 6, 13, 0); }
-`;
-
-const slideIn = keyframes`
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
-`;
-
-const slideOut = keyframes`
-  from { transform: translateX(0); }
-  to { transform: translateX(100%); }
-`;
-
-const Backdrop = styled.div<{ $closing: boolean }>`
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  background: rgba(8, 6, 13, 0.42);
-  display: flex;
-  justify-content: flex-end;
-  animation: ${(p) => (p.$closing ? fadeOut : fadeIn)} 200ms ease forwards;
-`;
-
-const DrawerShell = styled.aside<{ $closing: boolean }>`
-  width: min(520px, 96vw);
-  max-width: 96vw;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: var(--afs-panel);
-  border-left: 1px solid var(--afs-line);
-  box-shadow: -16px 0 48px rgba(8, 6, 13, 0.32);
-  transform: translateX(0);
-  animation: ${(p) => (p.$closing ? slideOut : slideIn)} 220ms cubic-bezier(0.32, 0.72, 0.24, 1) forwards;
-  will-change: transform;
-`;
 
 const DrawerHeader = styled.div`
   display: flex;
@@ -687,45 +611,31 @@ export function CommandsDrawer({
   sections: DrawerCommandSection[];
   onClose: () => void;
 }) {
-  const { closing, handleClose } = useDrawerAnimation(onClose);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") handleClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [handleClose]);
-
   return (
-    <Backdrop $closing={closing} onClick={handleClose} role="presentation">
-      <DrawerShell
-        $closing={closing}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <DrawerHeader>
-          <DrawerTitleStack>
-            <DrawerEyebrow>Commands</DrawerEyebrow>
-            <DrawerTitle>{title}</DrawerTitle>
-            {subline ? <DrawerSubline>{subline}</DrawerSubline> : null}
-          </DrawerTitleStack>
-          <CloseButton type="button" onClick={handleClose} aria-label="Close">
-            ×
-          </CloseButton>
-        </DrawerHeader>
+    <Drawer onClose={onClose} ariaLabel={title}>
+      {({ requestClose }) => (
+        <>
+          <DrawerHeader>
+            <DrawerTitleStack>
+              <DrawerEyebrow>Commands</DrawerEyebrow>
+              <DrawerTitle>{title}</DrawerTitle>
+              {subline ? <DrawerSubline>{subline}</DrawerSubline> : null}
+            </DrawerTitleStack>
+            <CloseButton type="button" onClick={requestClose} aria-label="Close">
+              ×
+            </CloseButton>
+          </DrawerHeader>
 
-        <DrawerBody>
-          <BodyStack>
-            {sections.map((section, idx) => (
-              <CommandSectionRow key={idx} section={section} />
-            ))}
-          </BodyStack>
-        </DrawerBody>
-      </DrawerShell>
-    </Backdrop>
+          <DrawerBody>
+            <BodyStack>
+              {sections.map((section, idx) => (
+                <CommandSectionRow key={idx} section={section} />
+              ))}
+            </BodyStack>
+          </DrawerBody>
+        </>
+      )}
+    </Drawer>
   );
 }
 

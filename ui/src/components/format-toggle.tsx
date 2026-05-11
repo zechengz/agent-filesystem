@@ -133,14 +133,15 @@ const Tab = styled.button<{ $active?: boolean }>`
   letter-spacing: 0.06em;
   padding: 3px 9px;
   border-radius: 4px;
-  border: 1px solid ${(p) => (p.$active ? "var(--afs-accent)" : "var(--afs-line)")};
-  background: ${(p) => (p.$active ? "var(--afs-accent)" : "transparent")};
-  color: ${(p) => (p.$active ? "var(--afs-ink-on-accent)" : "var(--afs-muted)")};
+  border: 1px solid ${(p) => (p.$active ? "var(--afs-selection-border)" : "var(--afs-line)")};
+  background: ${(p) => (p.$active ? "var(--afs-selection-bg)" : "transparent")};
+  color: ${(p) => (p.$active ? "var(--afs-selection-text)" : "var(--afs-muted)")};
   cursor: pointer;
 
   &:hover:not(:disabled) {
-    color: ${(p) => (p.$active ? "var(--afs-ink-on-accent)" : "var(--afs-accent)")};
-    border-color: var(--afs-accent);
+    color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
+    border-color: var(--afs-selection-border);
+    background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
   }
 
   &:disabled {

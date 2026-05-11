@@ -522,7 +522,7 @@ func TestUnmountWorkspaceTargetByWorkspaceName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unmountWorkspaceTarget() returned error: %v", err)
 	}
-	if !strings.Contains(out, "Workspace unmounted") || !strings.Contains(out, "workspace  notes") {
+	if !strings.Contains(out, "Volume unmounted") || !strings.Contains(out, "volume  notes") {
 		t.Fatalf("output missing unmount result:\n%s", out)
 	}
 	loaded, err := loadMountRegistry()
@@ -687,13 +687,13 @@ func TestCmdUnmountNoArgsPromptsForSelection(t *testing.T) {
 		t.Fatalf("cmdUnmountArgs(nil) returned error: %v", err)
 	}
 	for _, want := range []string{
-		"Unmount workspace",
-		"#  Workspace  Path",
+		"Unmount volume",
+		"#  Volume  Path",
 		"1  alpha",
 		"2  beta",
-		"Workspace to unmount:",
-		"Workspace unmounted",
-		"workspace  beta",
+		"Volume to unmount:",
+		"Volume unmounted",
+		"volume  beta",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)

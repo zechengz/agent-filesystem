@@ -166,12 +166,12 @@ function TemplateInstallPage() {
               size="medium"
               onClick={() =>
                 void navigate({
-                  to: "/workspaces/$workspaceId",
-                  params: { workspaceId: workspace.id },
+                  to: "/volumes/$volumeId",
+                  params: { volumeId: workspace.id },
                 })
               }
             >
-              Open workspace
+              Open volume
             </Button>
           </NoticeBody>
         </EmptyState>
@@ -193,12 +193,12 @@ function TemplateInstallPage() {
               size="medium"
               onClick={() =>
                 void navigate({
-                  to: "/workspaces/$workspaceId",
-                  params: { workspaceId: workspace.id },
+                  to: "/volumes/$volumeId",
+                  params: { volumeId: workspace.id },
                 })
               }
             >
-              Open workspace
+              Open volume
             </Button>
           </NoticeBody>
         </EmptyState>
@@ -228,7 +228,7 @@ function TemplateInstallPage() {
           <HeaderEyebrow>Installed template</HeaderEyebrow>
           <HeaderTitle>{template.title}</HeaderTitle>
           <HeaderTagline>
-            Workspace <strong>{workspace.name}</strong> &middot;{" "}
+            Volume <strong>{workspace.name}</strong> &middot;{" "}
             {workspace.fileCount} file{workspace.fileCount === 1 ? "" : "s"}
           </HeaderTagline>
         </HeaderBody>
@@ -238,12 +238,12 @@ function TemplateInstallPage() {
             variant="secondary-fill"
             onClick={() =>
               void navigate({
-                to: "/workspaces/$workspaceId",
-                params: { workspaceId: workspace.id },
+                to: "/volumes/$volumeId",
+                params: { volumeId: workspace.id },
               })
             }
           >
-            Open workspace
+            Open volume
           </Button>
         </HeaderLinks>
       </Header>

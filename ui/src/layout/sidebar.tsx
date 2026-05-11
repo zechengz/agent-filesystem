@@ -120,7 +120,7 @@ export function AppSidebar() {
 
   const handleNavigate = (path: string) => void navigate({ to: path });
   const handlePrefetch = (path: string) => {
-    void router.preloadRoute({ to: path });
+    void router.preloadRoute({ to: path }).catch(() => undefined);
   };
   const openLogin = () => {
     const target = location.pathname + location.searchStr;
@@ -132,10 +132,13 @@ export function AppSidebar() {
 
   const renderRouteItem = (item: NavigationItem) => {
     const disabled = isEmpty && !ALWAYS_ENABLED_PATHS.has(item.path);
+    const active = isNavigationItemActive(item, location.pathname);
     return (
-      <S.NavItemWrapper key={item.path} $disabled={disabled}>
+      <S.NavItemWrapper key={item.path} $active={active} $disabled={disabled}>
         <SideBar.Item
-          isActive={isNavigationItemActive(item, location.pathname)}
+          isActive={active}
+          data-afs-nav-item
+          data-afs-nav-active={active ? "true" : "false"}
           tooltipProps={{
             text: disabled
               ? `${item.label} (add a database first)`

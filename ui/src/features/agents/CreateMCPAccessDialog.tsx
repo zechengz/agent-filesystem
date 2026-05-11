@@ -21,6 +21,7 @@ import {
   useCreateMCPAccessTokenMutation,
 } from "../../foundation/hooks/use-afs";
 import type {
+  AFSMCPCapability,
   AFSMCPProfile,
   AFSMCPToken,
   AFSWorkspaceSummary,
@@ -28,7 +29,7 @@ import type {
 
 type WorkspaceOption = { key: string; workspace: AFSWorkspaceSummary };
 
-type TokenScopeMode = "control-plane" | "workspace";
+type TokenScopeMode = "control-plane" | "volume";
 
 type Props = {
   isOpen: boolean;
@@ -50,10 +51,10 @@ export function CreateMCPAccessDialog({
   const createWorkspaceToken = useCreateMCPAccessTokenMutation();
   const createControlPlaneToken = useCreateControlPlaneTokenMutation();
 
-  const [scopeMode, setScopeMode] = useState<TokenScopeMode>(initialScope ?? "workspace");
+  const [scopeMode, setScopeMode] = useState<TokenScopeMode>(initialScope ?? "volume");
   const [workspaceKey, setWorkspaceKey] = useState("");
   const [name, setName] = useState("");
-  const [profile, setProfile] = useState<AFSMCPProfile>("workspace-rw");
+  const [capability, setCapability] = useState<AFSMCPCapability>("rw");
   const [expiry, setExpiry] = useState("7d");
   const [createdToken, setCreatedToken] = useState<AFSMCPToken | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -76,9 +77,9 @@ export function CreateMCPAccessDialog({
     setCreatedToken(null);
     setFormError(null);
     setName("");
-    setProfile("workspace-rw");
+    setCapability("rw");
     setExpiry("7d");
-    setScopeMode(initialScope ?? "workspace");
+    setScopeMode(initialScope ?? "volume");
     const requestedKey =
       initialWorkspaceId && initialDatabaseId
         ? keyFor(initialDatabaseId, initialWorkspaceId)
@@ -109,7 +110,9 @@ export function CreateMCPAccessDialog({
         databaseId: selected.databaseId,
         workspaceId: selected.id,
         name: name.trim() || undefined,
-        profile,
+        profile: profileForCapability(capability),
+        scope: `volume:${selected.id}`,
+        capability,
         expiresAt: expiryValueToTimestamp(expiry),
       });
       setCreatedToken(token);
@@ -142,7 +145,7 @@ export function CreateMCPAccessDialog({
         serverName:
           createdToken.scope === "control-plane"
             ? "agent-filesystem"
-            : `afs-${(createdToken.workspaceName ?? selected?.name ?? "workspace").trim()}`,
+            : `afs-${(createdToken.workspaceName ?? selected?.name ?? "volume").trim()}`,
       })
     : null;
 
@@ -151,7 +154,7 @@ export function CreateMCPAccessDialog({
     if (pending) {
       return scopeMode === "control-plane" ? "Issuing..." : "Creating...";
     }
-    return scopeMode === "control-plane" ? "Issue control-plane token" : "Create workspace token";
+    return scopeMode === "control-plane" ? "Issue control-plane token" : "Create volume token";
   })();
 
   return (
@@ -218,16 +221,16 @@ export function CreateMCPAccessDialog({
             <ScopeField>
               <FieldLabel>Scope</FieldLabel>
               <ScopeRow>
-                <ScopeOption $selected={scopeMode === "workspace"}>
+                <ScopeOption $selected={scopeMode === "volume"}>
                   <input
                     type="radio"
-                    checked={scopeMode === "workspace"}
-                    onChange={() => setScopeMode("workspace")}
+                    checked={scopeMode === "volume"}
+                    onChange={() => setScopeMode("volume")}
                   />
                   <ScopeLabel>
-                    <ScopeName>Workspace</ScopeName>
+                    <ScopeName>Volume</ScopeName>
                     <ScopeHint>
-                      File tools scoped to one workspace.
+                      File tools scoped to one content tree.
                     </ScopeHint>
                   </ScopeLabel>
                 </ScopeOption>
@@ -240,20 +243,20 @@ export function CreateMCPAccessDialog({
                   <ScopeLabel>
                     <ScopeName>Control plane</ScopeName>
                     <ScopeHint>
-                      Manage workspaces + mint workspace tokens on demand.
+                      Manage workspaces + mint scoped tokens on demand.
                     </ScopeHint>
                   </ScopeLabel>
                 </ScopeOption>
               </ScopeRow>
             </ScopeField>
 
-            {scopeMode === "workspace" ? (
+            {scopeMode === "volume" ? (
               <Field>
-                Workspace
+                Volume
                 <Select
                   options={
                     options.length === 0
-                      ? [{ value: "", label: "No workspaces available" }]
+                      ? [{ value: "", label: "No volumes available" }]
                       : options.map((option) => ({
                           value: option.key,
                           label: option.workspace.name,
@@ -274,22 +277,22 @@ export function CreateMCPAccessDialog({
                 placeholder={
                   scopeMode === "control-plane"
                     ? "e.g. dev laptop, staging agent"
-                    : "Claude Desktop on Rowan's Mac"
+                    : "Codex on Rowan's Mac"
                 }
               />
             </Field>
 
-            {scopeMode === "workspace" ? (
+            {scopeMode === "volume" ? (
               <Field>
-                Access profile
+                Capability
                 <Select
                   options={[
-                    { value: "workspace-ro", label: "Read only" },
-                    { value: "workspace-rw", label: "Read / write" },
-                    { value: "workspace-rw-checkpoint", label: "Read / write + checkpoints" },
+                    { value: "ro", label: "Read only" },
+                    { value: "rw", label: "Read / write" },
+                    { value: "rw-checkpoint", label: "Read / write + checkpoints" },
                   ]}
-                  value={profile}
-                  onChange={(next) => setProfile(next as AFSMCPProfile)}
+                  value={capability}
+                  onChange={(next) => setCapability(next as AFSMCPCapability)}
                 />
               </Field>
             ) : null}
@@ -309,7 +312,7 @@ export function CreateMCPAccessDialog({
             </Field>
 
             <ToolPreview>
-              {toolListForScope(scopeMode, profile).map((tool) => (
+              {toolListForScope(scopeMode, capability).map((tool) => (
                 <ToolChip key={tool}>{tool}</ToolChip>
               ))}
             </ToolPreview>
@@ -330,7 +333,7 @@ export function CreateMCPAccessDialog({
                 type="submit"
                 size="medium"
                 disabled={
-                  pending || (scopeMode === "workspace" && selected == null)
+                  pending || (scopeMode === "volume" && selected == null)
                 }
               >
                 {submitLabel}
@@ -386,7 +389,19 @@ function buildSnippet({
   );
 }
 
-function toolListForScope(scope: TokenScopeMode, profile: AFSMCPProfile) {
+function profileForCapability(capability: AFSMCPCapability): AFSMCPProfile {
+  switch (capability) {
+    case "ro":
+      return "workspace-ro";
+    case "rw-checkpoint":
+      return "workspace-rw-checkpoint";
+    case "rw":
+    default:
+      return "workspace-rw";
+  }
+}
+
+function toolListForScope(scope: TokenScopeMode, capability: AFSMCPCapability) {
   if (scope === "control-plane") {
     return [
       "workspace_list",
@@ -401,10 +416,10 @@ function toolListForScope(scope: TokenScopeMode, profile: AFSMCPProfile) {
       "mcp_token_revoke",
     ];
   }
-  switch (profile) {
-    case "workspace-ro":
+  switch (capability) {
+    case "ro":
       return ["file_read", "file_lines", "file_list", "file_glob", "file_grep"];
-    case "workspace-rw":
+    case "rw":
       return [
         "file_read",
         "file_lines",
@@ -418,7 +433,7 @@ function toolListForScope(scope: TokenScopeMode, profile: AFSMCPProfile) {
         "file_delete_lines",
         "file_patch",
       ];
-    case "workspace-rw-checkpoint":
+    case "rw-checkpoint":
       return [
         "file_read",
         "file_lines",
@@ -516,13 +531,20 @@ const ScopeOption = styled.label<{ $selected: boolean }>`
   gap: 10px;
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid ${({ $selected }) => ($selected ? "var(--afs-accent, #2563eb)" : "var(--afs-line)")};
+  border: 1px solid ${({ $selected }) => ($selected ? "var(--afs-selection-border)" : "var(--afs-line)")};
   background: ${({ $selected }) =>
     $selected
-      ? "color-mix(in srgb, var(--afs-accent, #2563eb) 8%, var(--afs-panel))"
+      ? "var(--afs-selection-bg)"
       : "var(--afs-panel)"};
+  color: ${({ $selected }) => ($selected ? "var(--afs-selection-text)" : "var(--afs-ink)")};
   cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+
+  &:hover {
+    border-color: var(--afs-selection-border);
+    background: ${({ $selected }) => ($selected ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
+    color: ${({ $selected }) => ($selected ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
+  }
 
   input[type="radio"] {
     margin-top: 3px;

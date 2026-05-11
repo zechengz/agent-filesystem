@@ -178,6 +178,17 @@ func TestCLIExchangeTokenAuthenticatesProtectedRoutes(t *testing.T) {
 	if strings.TrimSpace(exchange.AccessToken) == "" {
 		t.Fatal("expected exchange access token to be populated")
 	}
+	tokenID, _, err := parseCLIAccessToken(exchange.AccessToken)
+	if err != nil {
+		t.Fatalf("parseCLIAccessToken() returned error: %v", err)
+	}
+	record, err := manager.catalog.GetCLIAccessToken(context.Background(), tokenID)
+	if err != nil {
+		t.Fatalf("GetCLIAccessToken() returned error: %v", err)
+	}
+	if record.Scope != cliScopeAccount || record.Capability != cliCapabilityAccount {
+		t.Fatalf("onboarding cli token scope/capability = %q/%q, want account/account", record.Scope, record.Capability)
+	}
 
 	req, err = http.NewRequest(http.MethodGet, server.URL+"/v1/workspaces", nil)
 	if err != nil {
@@ -218,6 +229,140 @@ func TestCLIExchangeTokenAuthenticatesProtectedRoutes(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("authorized POST client session status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+}
+
+func TestWorkspaceMountCLITokenIsScopedAndForcesReadonly(t *testing.T) {
+	manager, _ := newTestManager(t)
+	auth, err := NewAuthHandler(AuthConfig{
+		Mode:              AuthModeTrustedHeader,
+		TrustedUserHeader: "X-Forwarded-User",
+		TrustedNameHeader: "X-Forwarded-Name",
+	})
+	if err != nil {
+		t.Fatalf("NewAuthHandler() returned error: %v", err)
+	}
+
+	ownerCtx := context.WithValue(context.Background(), authIdentityContextKey, AuthIdentity{
+		Subject: "rowan@example.com",
+		Name:    "Rowan",
+		Email:   "rowan@example.com",
+	})
+	if _, err := manager.CreateResolvedWorkspace(ownerCtx, createWorkspaceRequest{
+		Name:   "other",
+		Source: sourceRef{Kind: SourceBlank},
+	}); err != nil {
+		t.Fatalf("CreateResolvedWorkspace(other) returned error: %v", err)
+	}
+
+	server := httptest.NewServer(NewHandlerWithOptions(manager, HandlerOptions{
+		AllowOrigin: "*",
+		Auth:        auth,
+	}))
+	defer server.Close()
+
+	body := strings.NewReader(fmtJSON(t, createCLIAccessTokenRequest{
+		Name:       "readonly repo mount",
+		Capability: cliCapabilityMountRO,
+	}))
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/workspaces/repo/cli-tokens", body)
+	if err != nil {
+		t.Fatalf("NewRequest(cli token) returned error: %v", err)
+	}
+	req.Header.Set("X-Forwarded-User", "rowan@example.com")
+	req.Header.Set("X-Forwarded-Name", "Rowan")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST cli token returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST cli token status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+	var token cliAccessTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+		t.Fatalf("Decode(cli token) returned error: %v", err)
+	}
+	if strings.TrimSpace(token.Token) == "" {
+		t.Fatal("expected cli token secret")
+	}
+	if token.Scope != cliWorkspaceScope(token.WorkspaceID) || token.Capability != cliCapabilityMountRO {
+		t.Fatalf("token scope/capability = %q/%q, want workspace scope/mount-ro", token.Scope, token.Capability)
+	}
+
+	req, err = http.NewRequest(http.MethodGet, server.URL+"/v1/workspaces", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(workspaces) returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token.Token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET scoped workspaces returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET scoped workspaces status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var workspaces workspaceListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&workspaces); err != nil {
+		t.Fatalf("Decode(scoped workspaces) returned error: %v", err)
+	}
+	if len(workspaces.Items) != 1 || workspaces.Items[0].Name != "repo" {
+		t.Fatalf("scoped workspaces = %#v, want only repo", workspaces.Items)
+	}
+
+	req, err = http.NewRequest(http.MethodGet, server.URL+"/v1/workspaces/repo", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(workspace detail) returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token.Token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET workspace detail returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET workspace detail status = %d, want %d, body=%s", resp.StatusCode, http.StatusForbidden, body)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/v1/client/workspaces/repo/sessions", strings.NewReader(`{"readonly":false}`))
+	if err != nil {
+		t.Fatalf("NewRequest(client session) returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token.Token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST client session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST client session status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+	var session workspaceSession
+	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
+		t.Fatalf("Decode(client session) returned error: %v", err)
+	}
+	if !session.Readonly {
+		t.Fatal("session.Readonly = false, want true for mount-ro token")
+	}
+
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/v1/client/workspaces/other/sessions", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(other client session) returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token.Token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST other client session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST other client session status = %d, want %d, body=%s", resp.StatusCode, http.StatusNotFound, body)
 	}
 }
 

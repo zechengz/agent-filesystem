@@ -64,8 +64,8 @@ vi.mock("../../foundation/tables/activity-table", () => ({
   ),
 }));
 
-describe("ActivityTab workspace history", () => {
-  test("loads workspace-scoped history and routes file activity back to browse", () => {
+describe("ActivityTab volume history", () => {
+  test("loads volume-scoped history and routes file activity back to browse", () => {
     const onTabChange = vi.fn();
 
     render(
@@ -77,7 +77,7 @@ describe("ActivityTab workspace history", () => {
       />,
     );
 
-    expect(screen.getByText("Workspace history")).toBeInTheDocument();
+    expect(screen.getByText("Volume history")).toBeInTheDocument();
     expect(useActivityPageMock).toHaveBeenCalledWith(
       {
         databaseId: "db-1",

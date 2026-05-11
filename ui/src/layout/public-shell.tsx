@@ -172,9 +172,9 @@ const publicLinkBase = `
   transition: background var(--afs-dur-fast) var(--afs-ease), border-color var(--afs-dur-fast) var(--afs-ease), color var(--afs-dur-fast) var(--afs-ease);
 
   &:hover {
-    border-color: var(--afs-line-strong);
-    background: var(--afs-bg-2);
-    color: var(--afs-ink);
+    border-color: var(--afs-selection-border);
+    background: var(--afs-selection-hover-bg);
+    color: var(--afs-selection-hover-ink);
   }
 
   &:focus-visible {
@@ -186,9 +186,9 @@ const publicLinkBase = `
 const PublicNavLink = styled(Link)<{ $active: boolean }>`
   ${publicLinkBase}
   ${({ $active }) => $active ? `
-    border-color: var(--afs-line-strong);
-    background: var(--afs-accent-soft);
-    color: var(--afs-accent);
+    border-color: var(--afs-selection-border);
+    background: var(--afs-selection-bg);
+    color: var(--afs-selection-text);
   ` : ""}
 `;
 

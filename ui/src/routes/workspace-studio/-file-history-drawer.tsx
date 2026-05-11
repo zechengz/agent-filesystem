@@ -638,15 +638,22 @@ const VersionButton = styled.button<{ $active: boolean }>`
   width: 100%;
   text-align: left;
   border-radius: 12px;
-  border: 1px solid ${({ $active }) => ($active ? "var(--afs-focus)" : "var(--afs-line)")};
-  background: ${({ $active }) => ($active ? "var(--afs-focus-soft)" : "var(--afs-panel-strong)")};
-  color: var(--afs-ink);
+  border: 1px solid ${({ $active }) => ($active ? "var(--afs-selection-border)" : "var(--afs-line)")};
+  background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "var(--afs-panel-strong)")};
+  color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-ink)")};
   padding: 10px 12px;
   cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+
+  &:hover {
+    border-color: var(--afs-selection-border);
+    background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
+    color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
+  }
 `;
 
 const ActivityButton = styled(VersionButton)`
-  background: ${({ $active }) => ($active ? "var(--afs-focus-soft)" : "rgba(255, 255, 255, 0.45)")};
+  background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "rgba(255, 255, 255, 0.45)")};
 `;
 
 const VersionTitleRow = styled.div`

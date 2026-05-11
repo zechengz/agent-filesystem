@@ -3,36 +3,34 @@ import { Folder, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import styled from "styled-components";
 import {
+  DialogActions,
+  DialogBody,
+  DialogCard,
+  DialogCloseButton,
+  DialogHeader,
+  DialogOverlay,
+  DialogTitle,
   Field,
-  MetaItem,
-  StatGrid,
-  StatLabel,
-  StatValue,
-  StatDetail,
   TextInput,
   Tag,
   ToneChip,
 } from "../../../components/afs-kit";
-import { availableWorkspaces } from "./sample-data";
 import type {
   Filesystem,
   Mount,
   MountMode,
   MountPersistence,
+  WorkspaceOption,
 } from "./types";
 
 type Props = {
   fs: Filesystem;
-  onAddRow: (kind: MountPersistence) => void;
+  volumes: WorkspaceOption[];
+  onAddVolumes: (mounts: Mount[]) => void;
   onUpdateRow: (
     kind: MountPersistence,
     idx: number,
     patch: { wsId?: string; mount?: string; mode?: MountMode },
-  ) => void;
-  onMoveRow: (
-    fromKind: MountPersistence,
-    fromIdx: number,
-    toKind: MountPersistence,
   ) => void;
   onRemoveRow: (kind: MountPersistence, idx: number) => void;
 };
@@ -64,15 +62,18 @@ function formatSize(b: number): string {
 
 export function MountsSection({
   fs,
-  onAddRow,
+  volumes,
+  onAddVolumes,
   onUpdateRow,
-  onMoveRow,
   onRemoveRow,
 }: Props) {
   const [editing, setEditing] = useState<{
     kind: MountPersistence;
     idx: number;
   } | null>(null);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [selectedVolumeIds, setSelectedVolumeIds] = useState<string[]>([]);
+  const [addMode, setAddMode] = useState<MountMode>("r");
 
   const rows: RowWithMeta[] = useMemo(() => {
     const out: RowWithMeta[] = [];
@@ -81,46 +82,87 @@ export function MountsSection({
     return out;
   }, [fs]);
 
+  const knownVolumes = useMemo(() => {
+    const merged = new Map<string, WorkspaceOption>();
+    for (const volume of volumes) {
+      merged.set(volume.id, volume);
+    }
+    return Array.from(merged.values());
+  }, [volumes]);
+
   const usedIds = new Set([...fs.shared, ...fs.perRun].map((m) => m.wsId));
+  const addableVolumes = volumes.filter((volume) => !usedIds.has(volume.id));
+
   function availableFor(currentId: string) {
-    return availableWorkspaces.filter(
+    return knownVolumes.filter(
       (w) => !usedIds.has(w.id) || w.id === currentId,
     );
   }
 
   const totalFiles = rows.reduce(
     (s, r) =>
-      s + (availableWorkspaces.find((w) => w.id === r.wsId)?.files ?? 0),
+      s + (knownVolumes.find((w) => w.id === r.wsId)?.files ?? 0),
     0,
   );
   const totalBytes = rows.reduce(
     (s, r) =>
       s +
-      bytesFromSize(availableWorkspaces.find((w) => w.id === r.wsId)?.size),
+      bytesFromSize(knownVolumes.find((w) => w.id === r.wsId)?.size),
     0,
   );
 
+  function openAddDialog() {
+    setSelectedVolumeIds([]);
+    setAddMode("r");
+    setAddDialogOpen(true);
+  }
+
+  function closeAddDialog() {
+    setAddDialogOpen(false);
+  }
+
+  function toggleVolume(volumeId: string) {
+    setSelectedVolumeIds((current) =>
+      current.includes(volumeId)
+        ? current.filter((id) => id !== volumeId)
+        : [...current, volumeId],
+    );
+  }
+
+  function addSelectedVolumes() {
+    const mounts = selectedVolumeIds.flatMap((volumeId) => {
+      const volume = addableVolumes.find((item) => item.id === volumeId);
+      if (volume == null) return [];
+      return [
+        {
+          wsId: volume.id,
+          mount: "/" + volume.name.replace(/^\/+/, ""),
+          mode: addMode,
+        },
+      ];
+    });
+
+    if (mounts.length === 0) return;
+    onAddVolumes(mounts);
+    closeAddDialog();
+  }
+
+  const addButtonLabel =
+    selectedVolumeIds.length === 0
+      ? "Add volumes"
+      : selectedVolumeIds.length === 1
+        ? "Add volume"
+        : `Add ${selectedVolumeIds.length} volumes`;
+
   return (
     <Stack>
-      <StatGrid>
-        <MetaItem>
-          <StatLabel>Mounted folders</StatLabel>
-          <StatValue>{rows.length}</StatValue>
-          <StatDetail>
-            {fs.shared.length} shared · {fs.perRun.length} per-run
-          </StatDetail>
-        </MetaItem>
-        <MetaItem>
-          <StatLabel>Total files</StatLabel>
-          <StatValue>{totalFiles.toLocaleString()}</StatValue>
-          <StatDetail>across all workspaces</StatDetail>
-        </MetaItem>
-        <MetaItem>
-          <StatLabel>Total size</StatLabel>
-          <StatValue>{formatSize(totalBytes)}</StatValue>
-          <StatDetail>summed across mounts</StatDetail>
-        </MetaItem>
-      </StatGrid>
+      <SectionToolbar>
+        <SectionTitle>Volumes</SectionTitle>
+        <Button size="medium" onClick={openAddDialog}>
+          <Plus size={16} strokeWidth={2} aria-hidden="true" />
+          &nbsp;Add Volume
+        </Button>
+      </SectionToolbar>
 
       <RowList>
         <RootRow>
@@ -129,26 +171,31 @@ export function MountsSection({
             <strong>/</strong> &mdash; filesystem root
           </span>
           <RootMeta>
-            {rows.length} {rows.length === 1 ? "workspace" : "workspaces"} ·{" "}
+            {rows.length} {rows.length === 1 ? "volume" : "volumes"} ·{" "}
+            {totalFiles.toLocaleString()}{" "}
+            {totalFiles === 1 ? "file" : "files"} ·{" "}
             {formatSize(totalBytes)}
           </RootMeta>
         </RootRow>
 
         {rows.length === 0 ? (
           <EmptyHint>
-            No folders yet. Add one below to start building this agent's
-            filesystem.
+            No volumes yet. Add a volume to start building this agent's filesystem.
           </EmptyHint>
         ) : null}
 
-        {rows.map((row) => {
-          const ws = availableWorkspaces.find((w) => w.id === row.wsId);
+        {rows.map((row, index) => {
+          const ws = knownVolumes.find((w) => w.id === row.wsId);
           const isEditing =
             editing != null &&
             editing.kind === row.kind &&
             editing.idx === row.idx;
           return (
-            <MountRow key={`${row.kind}-${row.idx}`} $editing={isEditing}>
+            <MountRow
+              key={`${row.kind}-${row.idx}`}
+              $editing={isEditing}
+              $isLast={index === rows.length - 1}
+            >
               <RowMain>
                 <Folder size={18} strokeWidth={1.75} aria-hidden="true" />
                 <RowTitle>
@@ -171,10 +218,8 @@ export function MountsSection({
               </RowFiles>
 
               <RowBadges>
-                <ToneChip $tone={row.kind === "shared" ? "git-import" : "blank"}>
-                  {row.kind === "shared" ? "Shared" : "Per-run"}
-                </ToneChip>
-                <Tag>{row.mode === "rw" ? "read / write" : "read"}</Tag>
+                <ToneChip $tone="git-import">Mounted</ToneChip>
+                <Tag>{row.mode === "rw" ? "read / write" : "Read-Only"}</Tag>
               </RowBadges>
 
               <RowActions>
@@ -204,7 +249,7 @@ export function MountsSection({
               {isEditing ? (
                 <EditPanel>
                   <Field>
-                    Workspace
+                    Volume
                     <Select
                       options={availableFor(row.wsId).map((w) => ({
                         value: w.id,
@@ -212,9 +257,7 @@ export function MountsSection({
                       }))}
                       value={row.wsId}
                       onChange={(value) => {
-                        const next = availableWorkspaces.find(
-                          (w) => w.id === value,
-                        );
+                        const next = knownVolumes.find((w) => w.id === value);
                         onUpdateRow(row.kind, row.idx, {
                           wsId: value,
                           mount: "/" + (next?.name ?? "mount"),
@@ -231,23 +274,6 @@ export function MountsSection({
                           mount: event.target.value,
                         })
                       }
-                    />
-                  </Field>
-                  <Field>
-                    Persistence
-                    <Select
-                      options={[
-                        { value: "shared", label: "Shared" },
-                        { value: "perRun", label: "Per-run" },
-                      ]}
-                      value={row.kind}
-                      onChange={(value) => {
-                        const next = value as MountPersistence;
-                        if (next !== row.kind) {
-                          onMoveRow(row.kind, row.idx, next);
-                          setEditing(null);
-                        }
-                      }}
                     />
                   </Field>
                   <Field>
@@ -272,42 +298,99 @@ export function MountsSection({
         })}
       </RowList>
 
-      <AddRow>
-        <Button
-          size="small"
-          variant="secondary-fill"
-          onClick={() => onAddRow("shared")}
+      {addDialogOpen ? (
+        <DialogOverlay
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="add-volumes-title"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeAddDialog();
+            }
+          }}
         >
-          <Plus size={14} strokeWidth={2} aria-hidden="true" />
-          &nbsp;Add shared folder
-        </Button>
-        <Button
-          size="small"
-          variant="secondary-fill"
-          onClick={() => onAddRow("perRun")}
-        >
-          <Plus size={14} strokeWidth={2} aria-hidden="true" />
-          &nbsp;Add per-run folder
-        </Button>
-      </AddRow>
+          <DialogCard>
+            <DialogHeader>
+              <div>
+                <DialogTitle id="add-volumes-title">Add volumes</DialogTitle>
+                <DialogBody>
+                  Select one or more volumes to mount, then choose the
+                  permissions this agent should use.
+                </DialogBody>
+              </div>
+              <DialogCloseButton type="button" onClick={closeAddDialog}>
+                &times;
+              </DialogCloseButton>
+            </DialogHeader>
 
-      <ExplainerGrid>
-        <Explainer>
-          <ExplainerTitle>Shared workspace</ExplainerTitle>
-          <ExplainerBody>
-            One folder, persistent across all runs. Every run reads and writes
-            the same files. Use for memory, knowledge bases, sources.
-          </ExplainerBody>
-        </Explainer>
-        <Explainer>
-          <ExplainerTitle>Per-run workspace</ExplainerTitle>
-          <ExplainerBody>
-            A fresh copy is mounted at the start of each run and saved or
-            discarded when the run ends. Use for scratch space and sandboxes
-            that must not leak between sessions.
-          </ExplainerBody>
-        </Explainer>
-      </ExplainerGrid>
+            <WizardBody>
+              <Field>
+                Volumes
+                {addableVolumes.length === 0 ? (
+                  <EmptyVolumes>All available volumes are already mounted.</EmptyVolumes>
+                ) : (
+                  <VolumeList>
+                    {addableVolumes.map((volume) => {
+                      const selected = selectedVolumeIds.includes(volume.id);
+                      return (
+                        <VolumeOption key={volume.id} $selected={selected}>
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            aria-label={`Select ${volume.name}`}
+                            onChange={() => toggleVolume(volume.id)}
+                          />
+                          <VolumeOptionMain>
+                            <VolumeName>/{volume.name}</VolumeName>
+                            <VolumeMeta>
+                              {volume.name} · {volume.id}
+                            </VolumeMeta>
+                          </VolumeOptionMain>
+                          <VolumeStats>
+                            {volume.files.toLocaleString()} files · {volume.size}
+                          </VolumeStats>
+                        </VolumeOption>
+                      );
+                    })}
+                  </VolumeList>
+                )}
+              </Field>
+
+              <Field>
+                Permissions
+                <Select
+                  options={[
+                    { value: "r", label: "Read only" },
+                    { value: "rw", label: "Read / write" },
+                  ]}
+                  value={addMode}
+                  onChange={(value) => setAddMode(value as MountMode)}
+                />
+              </Field>
+            </WizardBody>
+
+            <DialogActions>
+              <Button
+                size="medium"
+                type="button"
+                variant="secondary-fill"
+                onClick={closeAddDialog}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="medium"
+                type="button"
+                disabled={selectedVolumeIds.length === 0}
+                onClick={addSelectedVolumes}
+              >
+                {addButtonLabel}
+              </Button>
+            </DialogActions>
+          </DialogCard>
+        </DialogOverlay>
+      ) : null}
+
     </Stack>
   );
 }
@@ -316,6 +399,27 @@ const Stack = styled.div`
   display: flex;
   flex-direction: column;
   gap: 16px;
+`;
+
+const SectionToolbar = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+
+  @media (max-width: 560px) {
+    align-items: stretch;
+    flex-direction: column;
+  }
+`;
+
+const SectionTitle = styled.h2`
+  margin: 0;
+  color: var(--afs-ink);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0;
 `;
 
 const RowList = styled.div`
@@ -352,15 +456,38 @@ const EmptyHint = styled.div`
   font-size: 13px;
 `;
 
-const MountRow = styled.div<{ $editing: boolean }>`
+const MountRow = styled.div<{ $editing: boolean; $isLast: boolean }>`
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 16px;
   align-items: center;
-  padding: 12px 14px;
+  padding: 12px 14px 12px 54px;
   border-bottom: 1px solid var(--afs-line);
   background: ${({ $editing }) =>
     $editing ? "var(--afs-bg-soft)" : "transparent"};
+
+  &::before,
+  &::after {
+    content: "";
+    position: absolute;
+    background: var(--afs-line-strong);
+    pointer-events: none;
+  }
+
+  &::before {
+    left: 28px;
+    top: 0;
+    bottom: ${({ $isLast }) => ($isLast ? "calc(100% - 28px)" : "0")};
+    width: 1px;
+  }
+
+  &::after {
+    left: 28px;
+    top: 28px;
+    width: 18px;
+    height: 1px;
+  }
 
   &:last-child {
     border-bottom: 0;
@@ -368,7 +495,17 @@ const MountRow = styled.div<{ $editing: boolean }>`
 
   @media (max-width: 760px) {
     grid-template-columns: minmax(0, 1fr) auto;
+    padding-left: 46px;
     row-gap: 8px;
+
+    &::before {
+      left: 22px;
+    }
+
+    &::after {
+      left: 22px;
+      width: 16px;
+    }
   }
 `;
 
@@ -426,11 +563,101 @@ const RowFilesLabel = styled.span`
   font-size: 11px;
 `;
 
+const WizardBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 20px;
+`;
+
+const VolumeList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow: auto;
+  padding-right: 4px;
+`;
+
+const VolumeOption = styled.label<{ $selected: boolean }>`
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid
+    ${({ $selected }) =>
+      $selected ? "var(--afs-selection-border)" : "var(--afs-line)"};
+  border-radius: 8px;
+  background: ${({ $selected }) =>
+    $selected ? "var(--afs-selection-bg)" : "var(--afs-panel)"};
+  color: ${({ $selected }) => ($selected ? "var(--afs-selection-text)" : "var(--afs-ink)")};
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+
+  &:hover {
+    border-color: var(--afs-selection-border);
+    background: ${({ $selected }) => ($selected ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
+    color: ${({ $selected }) => ($selected ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
+  }
+
+  input {
+    accent-color: var(--afs-accent);
+  }
+
+  @media (max-width: 560px) {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+`;
+
+const VolumeOptionMain = styled.span`
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const VolumeName = styled.span`
+  color: var(--afs-ink);
+  font-family: var(--afs-mono, monospace);
+  font-size: 13.5px;
+  font-weight: 700;
+`;
+
+const VolumeMeta = styled.span`
+  min-width: 0;
+  color: var(--afs-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const VolumeStats = styled.span`
+  color: var(--afs-muted);
+  font-size: 12px;
+  white-space: nowrap;
+
+  @media (max-width: 560px) {
+    grid-column: 2;
+    white-space: normal;
+  }
+`;
+
+const EmptyVolumes = styled.div`
+  padding: 18px 14px;
+  border: 1px solid var(--afs-line);
+  border-radius: 8px;
+  color: var(--afs-muted);
+  background: var(--afs-panel);
+  font-size: 13px;
+`;
+
 const RowBadges = styled.div`
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
 `;
 
 const RowActions = styled.div`
@@ -475,43 +702,4 @@ const EditPanel = styled.div`
   @media (max-width: 760px) {
     grid-template-columns: 1fr;
   }
-`;
-
-const AddRow = styled.div`
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-`;
-
-const ExplainerGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-
-  @media (max-width: 720px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const Explainer = styled.div`
-  border: 1px solid var(--afs-line);
-  border-radius: 12px;
-  padding: 14px 16px;
-  background: var(--afs-panel);
-`;
-
-const ExplainerTitle = styled.div`
-  color: var(--afs-ink);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  margin-bottom: 6px;
-`;
-
-const ExplainerBody = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 13px;
-  line-height: 1.5;
 `;

@@ -885,19 +885,19 @@ const StorageCapabilityBadge = styled.span<{ $supported?: boolean }>`
   border: 1px solid
     ${({ $supported }) =>
       $supported === true
-        ? "rgba(37, 99, 235, 0.24)"
+        ? "color-mix(in srgb, var(--afs-accent) 24%, transparent)"
         : $supported === false
           ? "rgba(220, 38, 38, 0.28)"
           : "var(--afs-line, #e4e4e7)"};
   background: ${({ $supported }) =>
     $supported === true
-      ? "rgba(37, 99, 235, 0.08)"
+      ? "color-mix(in srgb, var(--afs-accent) 8%, transparent)"
       : $supported === false
         ? "rgba(220, 38, 38, 0.08)"
         : "var(--afs-panel, #fff)"};
   color: ${({ $supported }) =>
     $supported === true
-      ? "#1d4ed8"
+      ? "var(--afs-accent)"
       : $supported === false
         ? "#b91c1c"
         : "var(--afs-ink-soft, #3f3f46)"};

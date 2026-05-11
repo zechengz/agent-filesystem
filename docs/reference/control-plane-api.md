@@ -1,7 +1,7 @@
 # AFS Control Plane API
 
 Date: 2026-04-05
-Last reviewed: 2026-04-30
+Last reviewed: 2026-05-10
 
 ## Goal
 
@@ -29,6 +29,7 @@ The shared nouns are:
 - `file`
 - `agent session`
 - `activity event`
+- `CLI access token`
 - `MCP access token`
 - `job`
 
@@ -94,6 +95,9 @@ Unless noted otherwise, paths below are rooted at `/v1`.
 - `GET /cli`
 - `GET /install.sh` (not under `/v1`; root-level installer script)
 - `POST /quickstart`
+
+`POST /auth/exchange` consumes a one-time onboarding token and returns an
+account-scoped CLI access token for the CLI to persist.
 
 ### Databases
 
@@ -200,6 +204,36 @@ rather than a standalone `PUT /files/content` route.
 
 Database-scoped equivalents are available under
 `/databases/{database_id}/workspaces/{workspace_id}/...`.
+
+### CLI Tokens
+
+- `POST /workspaces/{workspace_id}/cli-tokens`
+- `POST /databases/{database_id}/workspaces/{workspace_id}/cli-tokens`
+
+Workspace CLI token create requests accept:
+
+- `name`
+- `capability`: `mount-ro` or `mount-rw`
+- `readonly`: shorthand for `mount-ro`
+- `expires_at`: optional RFC3339 timestamp
+
+The create response includes the token secret once:
+
+- `id`
+- `name`
+- `database_id`
+- `workspace_id`
+- `workspace_name`
+- `scope`
+- `capability`
+- `token`
+- `created_at`
+- `expires_at`
+
+Account-scoped CLI tokens are minted by browser/onboarding login. Workspace
+mount tokens are intentionally narrower: they can list the scoped workspace and
+use the `/v1/client` mount-session surface for that workspace, but they should
+not manage account, workspace metadata, checkpoints, or MCP tokens.
 
 ### MCP Tokens
 

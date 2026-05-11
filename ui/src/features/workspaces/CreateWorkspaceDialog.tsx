@@ -36,6 +36,7 @@ type Props = {
   onClose: () => void;
   onFreeTierLimitHit?: () => void;
   initialTemplateId?: string;
+  resourceLabel?: string;
 };
 
 function eligibleDatabases(databases: AFSDatabaseScopeRecord[]) {
@@ -117,6 +118,7 @@ export function CreateWorkspaceDialog({
   onClose,
   onFreeTierLimitHit,
   initialTemplateId,
+  resourceLabel = "workspace",
 }: Props) {
   const { databases } = useDatabaseScope();
   const eligible = useMemo(() => eligibleDatabases(databases), [databases]);
@@ -149,6 +151,8 @@ export function CreateWorkspaceDialog({
     () => (selectedTemplateId ? findTemplate(selectedTemplateId) ?? null : null),
     [selectedTemplateId],
   );
+  const resourceTitle =
+    resourceLabel.charAt(0).toUpperCase() + resourceLabel.slice(1);
 
   // Initialize on open.
   useEffect(() => {
@@ -213,7 +217,7 @@ export function CreateWorkspaceDialog({
 
     const trimmedName = name.trim();
     if (trimmedName === "") {
-      setFormError("Workspace name is required.");
+      setFormError(`${resourceTitle} name is required.`);
       return;
     }
     setFormError(null);
@@ -235,8 +239,8 @@ export function CreateWorkspaceDialog({
         });
         onClose();
         void navigate({
-          to: "/workspaces/$workspaceId",
-          params: { workspaceId: result.workspaceId },
+          to: "/volumes/$volumeId",
+          params: { volumeId: result.workspaceId },
           search: { databaseId: result.databaseId, tab: "browse" },
         });
       } catch (error) {
@@ -268,7 +272,7 @@ export function CreateWorkspaceDialog({
       setFormError(
         error instanceof Error
           ? error.message
-          : "Unable to create the workspace.",
+          : `Unable to create the ${resourceLabel}.`,
       );
     }
   }
@@ -279,7 +283,7 @@ export function CreateWorkspaceDialog({
 
     const trimmedName = name.trim();
     if (trimmedName === "") {
-      setFormError("Workspace name is required.");
+      setFormError(`${resourceTitle} name is required.`);
       return;
     }
     setFormError(null);
@@ -310,7 +314,7 @@ export function CreateWorkspaceDialog({
       const tokenValue = token.token ?? "";
       if (tokenValue === "") {
         throw new Error(
-          "Workspace and token were created, but the token value was not returned; cannot seed files.",
+          `${resourceTitle} and token were created, but the token value was not returned; cannot seed files.`,
         );
       }
 
@@ -344,7 +348,7 @@ export function CreateWorkspaceDialog({
       setFormError(
         error instanceof Error
           ? error.message
-          : "Unable to create the workspace from this template.",
+          : `Unable to create the ${resourceLabel} from this template.`,
       );
     }
   }
@@ -387,7 +391,7 @@ export function CreateWorkspaceDialog({
     return (
       <DialogHeader>
         <div>
-          <DialogTitle>Create workspace</DialogTitle>
+          <DialogTitle>Create {resourceTitle}</DialogTitle>
           <DialogBody>
             Choose how you want to start. You can switch any time before you
             create.
@@ -426,7 +430,7 @@ export function CreateWorkspaceDialog({
           </TemplateSummary>
 
           <Field>
-            Workspace name
+            {resourceTitle} name
             <TextInput
               autoFocus
               value={name}
@@ -496,7 +500,7 @@ export function CreateWorkspaceDialog({
             onClick={() => selectMode("blank")}
           >
             <ModeTitle>Blank</ModeTitle>
-            <ModeHint>Empty workspace, add files later.</ModeHint>
+            <ModeHint>Empty {resourceLabel}, add files later.</ModeHint>
           </ModeCard>
           <ModeCard
             type="button"
@@ -557,7 +561,7 @@ export function CreateWorkspaceDialog({
         ) : null}
 
         <Field>
-          Workspace name
+          {resourceTitle} name
           <TextInput
             autoFocus
             value={name}
@@ -588,7 +592,7 @@ export function CreateWorkspaceDialog({
           <TextInput
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            placeholder="What this workspace is for, who owns it, and why it exists. (optional)"
+            placeholder={`What this ${resourceLabel} is for, who owns it, and why it exists. (optional)`}
           />
         </Field>
 
@@ -609,7 +613,7 @@ export function CreateWorkspaceDialog({
               ? "Creating..."
               : mode === "import"
                 ? "Create and import"
-                : "Create workspace"}
+                : `Create ${resourceLabel}`}
           </Button>
         </DialogActions>
       </FormGrid>
@@ -641,11 +645,12 @@ const ModeCard = styled(SurfaceCard).attrs({ as: "button", type: "button" })<{ $
   gap: 6px;
   padding: 14px;
   border: 1.5px solid
-    ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "var(--afs-line)")};
+    ${(p) => (p.$active ? "var(--afs-selection-border)" : "var(--afs-line)")};
   background: ${(p) =>
     p.$active
-      ? "color-mix(in srgb, var(--afs-accent, #2563eb) 8%, transparent)"
+      ? "var(--afs-selection-bg)"
       : "var(--afs-panel)"};
+  color: ${(p) => (p.$active ? "var(--afs-selection-text)" : "var(--afs-ink)")};
   text-align: left;
   cursor: pointer;
   transition:
@@ -653,7 +658,9 @@ const ModeCard = styled(SurfaceCard).attrs({ as: "button", type: "button" })<{ $
     background 120ms ease;
 
   &:hover {
-    border-color: var(--afs-accent, #2563eb);
+    border-color: var(--afs-selection-border);
+    background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
+    color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
   }
 `;
 

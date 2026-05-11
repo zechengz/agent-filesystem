@@ -2,18 +2,21 @@ import { useMemo, useRef, useLayoutEffect, useState, useCallback, useEffect } fr
 import { useNavigate } from "@tanstack/react-router";
 import styled, { css, keyframes } from "styled-components";
 import { RedisLogoDarkMinIcon } from "@redis-ui/icons/multicolor";
-import type { AFSAgentSession, AFSWorkspaceSummary } from "../foundation/types/afs";
-import { BotIcon, DatabaseIcon, FoldersIcon, LaptopIcon } from "./lucide-icons";
+import type {
+  AFSAgentSession,
+  AFSWorkspaceCompositionVolumeLabel,
+  AFSWorkspaceCompositionSummary,
+  AFSWorkspaceSummary,
+} from "../foundation/types/afs";
+import { BotIcon, FoldersIcon, LaptopIcon } from "./lucide-icons";
 import { formatBytes } from "../foundation/api/afs";
 import { AgentDetailDialog } from "../foundation/tables/agents-table";
-import {
-  compareAgentsByIdentity,
-  displayAgentIdentityLabel,
-} from "../foundation/tables/agents-table-utils";
+import { compareAgentsByIdentity } from "../foundation/tables/agents-table-utils";
 import { displayWorkspaceName } from "../foundation/workspace-display";
+import { groupMountedAgentWorkspaceSessions } from "../foundation/agent-session-grouping";
 
 /* ------------------------------------------------------------------ */
-/*  Live topology: agents <-> Redis hub <-> workspaces                 */
+/*  Live topology: agents <-> Redis hub <-> volumes                    */
 /* ------------------------------------------------------------------ */
 
 /* ---- Keyframes ---- */
@@ -50,7 +53,36 @@ const TOPOLOGY_LINE_STUB = 24;
 
 type HoveredTopologyItem =
   | { kind: "agent"; id: string; workspaceId: string }
-  | { kind: "workspace"; id: string };
+  | { kind: "workspace"; id: string }
+  | { kind: "volume"; id: string; workspaceId: string };
+
+type TopologyTargetKind = "agent-workspace" | "volume";
+
+type TopologyTarget = {
+  id: string;
+  kind: TopologyTargetKind;
+  name: string;
+  databaseId?: string;
+  fileCount?: number;
+  totalBytes?: number;
+  mountCount?: number;
+  mounted?: boolean;
+  fallback?: boolean;
+};
+
+type TopologyVolumeTarget = {
+  id: string;
+  workspaceId: string;
+  workspaceName: string;
+  volumeId: string;
+  name: string;
+  mountPath: string;
+  readonly: boolean;
+  mounted: boolean;
+  databaseId?: string;
+  fileCount?: number;
+  totalBytes?: number;
+};
 
 const TOPOLOGY_NODE_EXIT_MS = 420;
 const TOPOLOGY_MOTION_CONNECTION_LIMIT = 40;
@@ -112,6 +144,22 @@ const CardWrap = styled.div`
   overflow: hidden;
 `;
 
+const CardHeader = styled.div`
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+
+  @media (max-width: 720px) {
+    flex-direction: column;
+  }
+`;
+
+const CardHeading = styled.div`
+  min-width: 0;
+`;
+
 const CardTitle = styled.h3`
   margin: 0 0 4px;
   font-size: 18px;
@@ -121,7 +169,7 @@ const CardTitle = styled.h3`
 `;
 
 const CardSubtitle = styled.p`
-  margin: 0 0 20px;
+  margin: 0;
   font-size: 13px;
   color: var(--afs-muted, #71717a);
   line-height: 1.5;
@@ -184,12 +232,14 @@ const AgentNode = styled.button<{ $i: number; $presence: NodePresence; $highligh
   border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 10px;
   background: var(--afs-panel-strong);
-  color: inherit;
+  color: var(--afs-ink, #18181b);
   cursor: pointer;
   font: inherit;
   text-align: left;
   transition:
+    background 0.16s ease,
     border-color 0.16s ease,
+    color 0.16s ease,
     box-shadow 0.16s ease,
     transform 0.16s ease;
   ${nodePresenceStyles}
@@ -199,7 +249,9 @@ const AgentNode = styled.button<{ $i: number; $presence: NodePresence; $highligh
   }
 
   &:hover {
-    border-color: var(--afs-accent, #dc2626);
+    border-color: var(--afs-selection-border);
+    background: var(--afs-selection-hover-bg);
+    color: var(--afs-selection-hover-ink);
     box-shadow: 0 4px 12px rgba(8, 6, 13, 0.08);
     transform: translateY(-1px);
   }
@@ -207,20 +259,24 @@ const AgentNode = styled.button<{ $i: number; $presence: NodePresence; $highligh
   ${({ $highlighted }) =>
     $highlighted
       ? css`
-          border-color: var(--afs-accent, #dc2626);
-          background: color-mix(in srgb, var(--afs-accent, #dc2626) 8%, var(--afs-panel-strong));
-          box-shadow: 0 6px 18px rgba(8, 6, 13, 0.12);
+          border-color: var(--afs-selection-border);
+          background: var(--afs-selection-bg);
+          color: var(--afs-selection-text);
+          box-shadow:
+            inset 0 0 0 1px var(--afs-selection-border),
+            inset var(--afs-selection-indicator-width) 0 0 var(--afs-selection-indicator),
+            0 6px 18px rgba(8, 6, 13, 0.12);
           transform: translateY(-1px);
         `
       : null}
 
   [data-theme="dark"] &:hover,
   [data-theme="dark"] &[data-highlighted="true"] {
-    border-color: var(--afs-ok, #dcff1e);
+    border-color: var(--afs-selection-border);
   }
 
   &:focus-visible {
-    outline: 2px solid var(--afs-accent, #dc2626);
+    outline: 2px solid var(--afs-selection-border);
     outline-offset: 2px;
   }
 
@@ -244,13 +300,21 @@ const NodeIconBox = styled.div<{ $active?: boolean }>`
   color: ${({ $active }) => ($active ? "var(--afs-ok, #22c55e)" : "var(--afs-accent, #dc2626)")};
   background: color-mix(in srgb, currentColor 14%, transparent);
   flex-shrink: 0;
+
+  button:hover & {
+    color: var(--afs-selection-hover-ink);
+  }
+
+  button[data-highlighted="true"] & {
+    color: var(--afs-selection-text);
+  }
 `;
 
 const AgentLabel = styled.span`
   display: block;
   font-size: 12px;
   font-weight: 800;
-  color: var(--afs-ink, #18181b);
+  color: currentColor;
   overflow-wrap: anywhere;
   white-space: normal;
   max-width: 100%;
@@ -267,9 +331,10 @@ const AgentText = styled.div`
 const AgentPath = styled.span`
   display: block;
   max-width: 100%;
-  color: var(--afs-muted, #71717a);
+  color: currentColor;
   font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 10px;
+  opacity: 0.68;
   overflow-wrap: anywhere;
   white-space: normal;
 `;
@@ -344,12 +409,14 @@ const WorkspaceNode = styled.button<{ $i: number; $presence: NodePresence; $high
   border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 10px;
   background: var(--afs-panel-strong);
-  color: inherit;
+  color: var(--afs-ink, #18181b);
   cursor: pointer;
   font: inherit;
   text-align: left;
   transition:
+    background 0.16s ease,
     border-color 0.16s ease,
+    color 0.16s ease,
     box-shadow 0.16s ease,
     transform 0.16s ease;
   ${nodePresenceStyles}
@@ -359,7 +426,9 @@ const WorkspaceNode = styled.button<{ $i: number; $presence: NodePresence; $high
   }
 
   &:hover {
-    border-color: var(--afs-accent, #dc2626);
+    border-color: var(--afs-selection-border);
+    background: var(--afs-selection-hover-bg);
+    color: var(--afs-selection-hover-ink);
     box-shadow: 0 4px 12px rgba(8, 6, 13, 0.08);
     transform: translateY(-1px);
   }
@@ -367,20 +436,24 @@ const WorkspaceNode = styled.button<{ $i: number; $presence: NodePresence; $high
   ${({ $highlighted }) =>
     $highlighted
       ? css`
-          border-color: var(--afs-accent, #dc2626);
-          background: color-mix(in srgb, var(--afs-accent, #dc2626) 8%, var(--afs-panel-strong));
-          box-shadow: 0 6px 18px rgba(8, 6, 13, 0.12);
+          border-color: var(--afs-selection-border);
+          background: var(--afs-selection-bg);
+          color: var(--afs-selection-text);
+          box-shadow:
+            inset 0 0 0 1px var(--afs-selection-border),
+            inset var(--afs-selection-indicator-width) 0 0 var(--afs-selection-indicator),
+            0 6px 18px rgba(8, 6, 13, 0.12);
           transform: translateY(-1px);
         `
       : null}
 
   [data-theme="dark"] &:hover,
   [data-theme="dark"] &[data-highlighted="true"] {
-    border-color: var(--afs-ok, #dcff1e);
+    border-color: var(--afs-selection-border);
   }
 
   &:focus-visible {
-    outline: 2px solid var(--afs-accent, #dc2626);
+    outline: 2px solid var(--afs-selection-border);
     outline-offset: 2px;
   }
 
@@ -406,7 +479,7 @@ const WorkspaceName = styled.span`
   display: block;
   font-size: 12px;
   font-weight: 700;
-  color: var(--afs-ink, #18181b);
+  color: currentColor;
   overflow-wrap: anywhere;
   white-space: normal;
   max-width: 100%;
@@ -414,7 +487,8 @@ const WorkspaceName = styled.span`
 
 const WorkspaceFiles = styled.span`
   font-size: 10px;
-  color: var(--afs-muted, #71717a);
+  color: currentColor;
+  opacity: 0.68;
   overflow-wrap: anywhere;
   white-space: normal;
   max-width: 100%;
@@ -478,6 +552,35 @@ const DatabaseGroup = styled.div`
   }
 `;
 
+const WorkspaceTargetGroup = styled(DatabaseGroup)<{
+  $i: number;
+  $presence: NodePresence;
+  $highlighted?: boolean;
+}>`
+  width: fit-content;
+  min-width: var(--topology-node-min);
+  max-width: var(--topology-node-max);
+  box-sizing: border-box;
+  ${nodePresenceStyles}
+
+  ${({ $highlighted }) =>
+    $highlighted
+      ? css`
+          border-color: var(--afs-selection-border);
+          background: var(--afs-selection-bg);
+          box-shadow:
+            inset 0 0 0 1px var(--afs-selection-border),
+            inset var(--afs-selection-indicator-width) 0 0 var(--afs-selection-indicator),
+            0 6px 18px rgba(8, 6, 13, 0.12);
+        `
+      : null}
+
+  @media (max-width: 720px) {
+    width: 100%;
+    max-width: none;
+  }
+`;
+
 const DatabaseGroupHeader = styled.div`
   display: flex;
   align-items: center;
@@ -490,6 +593,41 @@ const DatabaseGroupHeader = styled.div`
   }
 `;
 
+const WorkspaceGroupHeaderButton = styled.button<{ $highlighted?: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: ${({ $highlighted }) =>
+    $highlighted ? "var(--afs-selection-text)" : "var(--afs-ink, #18181b)"};
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
+
+  [data-theme="dark"] & {
+    color: ${({ $highlighted }) =>
+      $highlighted ? "var(--afs-selection-text)" : "var(--afs-ok, #dcff1e)"};
+  }
+
+  &:hover {
+    background: var(--afs-selection-hover-bg);
+    color: var(--afs-selection-hover-ink);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--afs-selection-border);
+    outline-offset: 2px;
+  }
+`;
+
 const DatabaseGroupName = styled.span`
   font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12px;
@@ -497,6 +635,82 @@ const DatabaseGroupName = styled.span`
   letter-spacing: 0;
   overflow-wrap: anywhere;
   white-space: normal;
+`;
+
+const TargetCount = styled.span`
+  margin-left: auto;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--afs-panel);
+  border: 1px solid var(--afs-line);
+  color: var(--afs-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+`;
+
+const VolumeNode = styled.button<{ $highlighted?: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--afs-line, #e4e4e7);
+  border-radius: 10px;
+  background: var(--afs-panel-strong);
+  color: var(--afs-ink, #18181b);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+
+  &:hover {
+    border-color: var(--afs-selection-border);
+    background: var(--afs-selection-hover-bg);
+    color: var(--afs-selection-hover-ink);
+    box-shadow: 0 4px 12px rgba(8, 6, 13, 0.08);
+    transform: translateY(-1px);
+  }
+
+  ${({ $highlighted }) =>
+    $highlighted
+      ? css`
+          border-color: var(--afs-selection-border);
+          background: var(--afs-selection-bg);
+          color: var(--afs-selection-text);
+          box-shadow:
+            inset 0 0 0 1px var(--afs-selection-border),
+            inset var(--afs-selection-indicator-width) 0 0 var(--afs-selection-indicator),
+            0 6px 18px rgba(8, 6, 13, 0.12);
+          transform: translateY(-1px);
+        `
+      : null}
+
+  &:focus-visible {
+    outline: 2px solid var(--afs-selection-border);
+    outline-offset: 2px;
+  }
+`;
+
+const WorkspaceGroupEmpty = styled.div`
+  border: 1px dashed var(--afs-line, #e4e4e7);
+  border-radius: 10px;
+  padding: 12px;
+  color: var(--afs-muted, #71717a);
+  font-size: 11px;
+  line-height: 1.4;
 `;
 
 /* ---- Live status footer pill ---- */
@@ -619,7 +833,7 @@ function getAgentTopologyId(agent: AFSAgentSession): string {
   return agent.sessionId;
 }
 
-function getWorkspaceTopologyId(workspace: AFSWorkspaceSummary): string {
+function getWorkspaceTopologyId(workspace: TopologyTarget): string {
   return workspace.id;
 }
 
@@ -632,27 +846,97 @@ function connectionColor(agentId: string, workspaceId: string): string {
   return CONNECTION_COLORS[hash % CONNECTION_COLORS.length];
 }
 
-function sortWorkspacesForTopology(
+function buildTopologyTargets(
   agents: AFSAgentSession[],
-  workspaces: AFSWorkspaceSummary[],
-): AFSWorkspaceSummary[] {
-  const workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
-  const connectedIds: string[] = [];
+  agentWorkspaces: AFSWorkspaceCompositionSummary[],
+  volumes: AFSWorkspaceSummary[],
+): TopologyTarget[] {
+  const volumeById = new Map(volumes.map((volume) => [volume.id, volume]));
+  const targets: TopologyTarget[] = [];
   const seen = new Set<string>();
+  const mountedTargetIds = new Set(
+    agents.map((agent) => agent.workspaceId.trim()).filter((id) => id !== ""),
+  );
 
-  agents.forEach((agent) => {
-    if (workspaceById.has(agent.workspaceId) && !seen.has(agent.workspaceId)) {
-      seen.add(agent.workspaceId);
-      connectedIds.push(agent.workspaceId);
-    }
+  agentWorkspaces.forEach((agentWorkspace) => {
+    seen.add(agentWorkspace.id);
+    targets.push({
+      id: agentWorkspace.id,
+      kind: "agent-workspace",
+      name: agentWorkspace.name,
+      databaseId: agentWorkspace.databaseId,
+      mountCount: agentWorkspace.mountCount,
+      mounted: mountedTargetIds.has(agentWorkspace.id),
+    });
   });
 
-  const connected = connectedIds
-    .map((id) => workspaceById.get(id))
-    .filter((workspace): workspace is AFSWorkspaceSummary => workspace != null);
-  const disconnected = workspaces.filter((workspace) => !seen.has(workspace.id));
+  agents.forEach((agent) => {
+    const targetId = agent.workspaceId.trim();
+    if (targetId === "" || seen.has(targetId)) {
+      return;
+    }
+    seen.add(targetId);
 
-  return [...connected, ...disconnected];
+    const volume = volumeById.get(targetId);
+    if (volume != null) {
+      targets.push({
+        id: volume.id,
+        kind: "volume",
+        name: volume.name,
+        databaseId: volume.databaseId,
+        fileCount: volume.fileCount,
+        totalBytes: volume.totalBytes,
+        mounted: true,
+      });
+      return;
+    }
+
+    targets.push({
+      id: targetId,
+      kind: "volume",
+      name: agent.workspaceName || targetId,
+      databaseId: agent.databaseId,
+      mounted: true,
+      fallback: true,
+    });
+  });
+
+  return targets;
+}
+
+function buildWorkspaceVolumeTargets(
+  agentWorkspaces: AFSWorkspaceCompositionSummary[],
+  volumes: AFSWorkspaceSummary[],
+  mountedWorkspaceIds: Set<string>,
+): TopologyVolumeTarget[] {
+  const volumeById = new Map(volumes.map((volume) => [volume.id, volume]));
+  return agentWorkspaces.flatMap((workspace) =>
+    workspace.mountedVolumes.map((mount) =>
+      workspaceVolumeTarget(workspace, mount, volumeById, mountedWorkspaceIds),
+    ),
+  );
+}
+
+function workspaceVolumeTarget(
+  workspace: AFSWorkspaceCompositionSummary,
+  mount: AFSWorkspaceCompositionVolumeLabel,
+  volumeById: Map<string, AFSWorkspaceSummary>,
+  mountedWorkspaceIds: Set<string>,
+): TopologyVolumeTarget {
+  const volume = volumeById.get(mount.id);
+  return {
+    id: `${workspace.id}:${mount.id}:${mount.mountPath}`,
+    workspaceId: workspace.id,
+    workspaceName: workspace.name,
+    volumeId: mount.id,
+    name: mount.name?.trim() || volume?.name || mount.id,
+    mountPath: mount.mountPath.trim() || "/",
+    readonly: mount.readonly,
+    mounted: mountedWorkspaceIds.has(workspace.id),
+    databaseId: volume?.databaseId ?? workspace.databaseId,
+    fileCount: volume?.fileCount,
+    totalBytes: volume?.totalBytes,
+  };
 }
 
 function sortAgentsForTopology(agents: AFSAgentSession[]): AFSAgentSession[] {
@@ -665,15 +949,71 @@ function agentIsHighlighted(agent: AFSAgentSession, hovered: HoveredTopologyItem
   return hovered.id === agent.workspaceId;
 }
 
-function workspaceIsHighlighted(workspace: AFSWorkspaceSummary, hovered: HoveredTopologyItem | null): boolean {
+function workspaceIsHighlighted(workspace: TopologyTarget, hovered: HoveredTopologyItem | null): boolean {
   if (hovered == null) return false;
   if (hovered.kind === "workspace") return hovered.id === workspace.id;
+  if (hovered.kind === "volume") return hovered.workspaceId === workspace.id;
   return hovered.workspaceId === workspace.id;
+}
+
+function volumeIsHighlighted(volume: TopologyVolumeTarget, hovered: HoveredTopologyItem | null): boolean {
+  if (hovered == null) return false;
+  if (hovered.kind === "volume") return hovered.id === volume.id;
+  if (hovered.kind === "workspace") return hovered.id === volume.workspaceId;
+  return hovered.workspaceId === volume.workspaceId;
+}
+
+function targetKindLabel(kind: TopologyTargetKind): string {
+  return kind === "agent-workspace" ? "Agent Workspace" : "Volume";
+}
+
+function targetDetail(target: TopologyTarget): string {
+  if (target.kind === "agent-workspace") {
+    const mountCount = target.mountCount ?? 0;
+    const mountLabel = `${mountCount} volume${mountCount === 1 ? "" : "s"}`;
+    return `${target.mounted ? "Mounted" : "Not mounted"} · ${mountLabel}`;
+  }
+
+  if (target.fallback) {
+    return "Mounted volume";
+  }
+
+  const fileCount = target.fileCount ?? 0;
+  return `${fileCount} file${fileCount === 1 ? "" : "s"} · ${formatBytes(target.totalBytes ?? 0)}`;
+}
+
+function volumeDetail(volume: TopologyVolumeTarget): string {
+  const access = volume.readonly ? "read-only" : "read/write";
+  const size =
+    volume.fileCount == null
+      ? ""
+      : ` · ${volume.fileCount} file${volume.fileCount === 1 ? "" : "s"} · ${formatBytes(volume.totalBytes ?? 0)}`;
+  return `${volume.mounted ? "Mounted" : "Not mounted"} · ${volume.mountPath} · ${access}${size}`;
+}
+
+function openTopologyTarget(
+  navigate: ReturnType<typeof useNavigate>,
+  target: TopologyTarget,
+) {
+  if (target.kind === "agent-workspace") {
+    void navigate({
+      to: "/workspaces/$workspaceId",
+      params: { workspaceId: target.id },
+    });
+    return;
+  }
+
+  void navigate({
+    to: "/volumes/$volumeId",
+    params: { volumeId: target.id },
+    search: target.databaseId ? { databaseId: target.databaseId } : {},
+  });
 }
 
 function lineIsHighlighted(line: TopologyLine, hovered: HoveredTopologyItem | null): boolean {
   if (hovered == null) return false;
   if (hovered.kind === "agent") return hovered.id === line.agentId;
+  if (hovered.kind === "volume") return hovered.workspaceId === line.workspaceId;
   return hovered.id === line.workspaceId;
 }
 
@@ -751,17 +1091,34 @@ function useAnimatedTopologyItems<T>(
 type Props = {
   agents: AFSAgentSession[];
   workspaces: AFSWorkspaceSummary[];
+  agentWorkspaces?: AFSWorkspaceCompositionSummary[];
 };
 
-export function LiveTopologyCard({ agents, workspaces }: Props) {
+export function LiveTopologyCard({ agents, workspaces, agentWorkspaces = [] }: Props) {
   const navigate = useNavigate();
+  const groupedAgents = useMemo(
+    () => groupMountedAgentWorkspaceSessions(agents, agentWorkspaces),
+    [agents, agentWorkspaces],
+  );
   const sortedAgents = useMemo(
-    () => sortAgentsForTopology(agents),
-    [agents],
+    () => sortAgentsForTopology(groupedAgents),
+    [groupedAgents],
   );
   const sortedWorkspaces = useMemo(
-    () => sortWorkspacesForTopology(sortedAgents, workspaces),
-    [sortedAgents, workspaces],
+    () => buildTopologyTargets(sortedAgents, agentWorkspaces, workspaces),
+    [agentWorkspaces, sortedAgents, workspaces],
+  );
+  const mountedWorkspaceIds = useMemo(
+    () => new Set(sortedAgents.map((agent) => agent.workspaceId.trim()).filter(Boolean)),
+    [sortedAgents],
+  );
+  const workspaceVolumeTargets = useMemo(
+    () => buildWorkspaceVolumeTargets(agentWorkspaces, workspaces, mountedWorkspaceIds),
+    [agentWorkspaces, mountedWorkspaceIds, workspaces],
+  );
+  const targetById = useMemo(
+    () => new Map(sortedWorkspaces.map((target) => [target.id, target])),
+    [sortedWorkspaces],
   );
   const animatedAgents = useAnimatedTopologyItems(sortedAgents, getAgentTopologyId);
   const animatedWorkspaces = useAnimatedTopologyItems(sortedWorkspaces, getWorkspaceTopologyId);
@@ -775,13 +1132,13 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
   );
   const topologyRef = useRef<HTMLDivElement>(null);
   const agentRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const wsRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const wsRefs = useRef<(HTMLElement | null)[]>([]);
   const hubRef = useRef<HTMLDivElement>(null);
   const animationFrameRef = useRef<number | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<AFSAgentSession | null>(null);
   const [lines, setLines] = useState<TopologyLine[]>([]);
 
-  // Build a map: workspaceId -> index in the displayed workspace list
+  // Build a map: workspaceId -> index in the displayed mounted target list.
   const wsIndexMap = useMemo(() => {
     const map = new Map<string, number>();
     visibleWorkspaces.forEach(({ item }, i) => map.set(item.id, i));
@@ -917,7 +1274,17 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
     };
   }, [computeLines, visibleAgents.length, visibleWorkspaces.length, scheduleLineCompute]);
 
-  const activeAgents = agents.filter((a) => a.state === "active").length;
+  const activeAgents = sortedAgents.filter((a) => a.state === "active").length;
+  const mountedWorkspaceCount = sortedWorkspaces.filter(
+    (target) => target.kind === "agent-workspace" && target.mounted,
+  ).length;
+  const mountedVolumeCount =
+    sortedWorkspaces.filter((target) => target.kind === "volume").length +
+    workspaceVolumeTargets.filter((volume) => volume.mounted).length;
+  const workspaceMountSummary =
+    agentWorkspaces.length === 0
+      ? "0 workspaces"
+      : `${mountedWorkspaceCount}/${agentWorkspaces.length} workspace${agentWorkspaces.length === 1 ? "" : "s"} mounted`;
   const [hoveredItem, setHoveredItem] = useState<HoveredTopologyItem | null>(null);
   const animateConnectionMotion = connections.length <= TOPOLOGY_MOTION_CONNECTION_LIMIT;
 
@@ -943,33 +1310,39 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
     return Array.from(groups.values());
   }, [visibleAgents]);
 
-  // Group visible workspaces by database, preserving the flat visible index
-  // so wsRefs stays in sync with the connection-line indexing.
-  const workspaceGroups = useMemo(() => {
+  // Preserve the flat visible index so wsRefs stays in sync with
+  // connection-line indexing while the workspace column renders grouped cards.
+  const workspaceRows = useMemo(() => {
     type Row = {
-      ws: AFSWorkspaceSummary;
+      ws: TopologyTarget;
       presence: NodePresence;
       visibleIndex: number;
     };
-    const groups = new Map<
-      string,
-      { databaseId: string; databaseName: string; rows: Row[] }
-    >();
-    visibleWorkspaces.forEach(({ item: ws, presence }, visibleIndex) => {
-      const key = ws.databaseId || "_no_database";
-      let group = groups.get(key);
-      if (!group) {
-        group = {
-          databaseId: ws.databaseId,
-          databaseName: ws.databaseName.trim() || "Unassigned database",
-          rows: [],
-        };
-        groups.set(key, group);
-      }
-      group.rows.push({ ws, presence, visibleIndex });
-    });
-    return Array.from(groups.values());
+    return visibleWorkspaces
+      .map(({ item: ws, presence }, visibleIndex): Row => ({ ws, presence, visibleIndex }))
+      .filter(({ ws }) => ws.kind === "agent-workspace");
   }, [visibleWorkspaces]);
+
+  const directVolumeRows = useMemo(() => {
+    type Row = {
+      ws: TopologyTarget;
+      presence: NodePresence;
+      visibleIndex: number;
+    };
+    return visibleWorkspaces
+      .map(({ item: ws, presence }, visibleIndex): Row => ({ ws, presence, visibleIndex }))
+      .filter(({ ws }) => ws.kind === "volume");
+  }, [visibleWorkspaces]);
+
+  const workspaceVolumesByWorkspaceId = useMemo(() => {
+    const groups = new Map<string, TopologyVolumeTarget[]>();
+    workspaceVolumeTargets.forEach((volume) => {
+      const rows = groups.get(volume.workspaceId) ?? [];
+      rows.push(volume);
+      groups.set(volume.workspaceId, rows);
+    });
+    return groups;
+  }, [workspaceVolumeTargets]);
 
   // The hub represents the AFS control-plane (this server). Show the host
   // the browser is connected to — that's the ground truth for where agents
@@ -983,12 +1356,16 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
   return (
     <>
     <CardWrap>
-      <CardTitle>Live Topology</CardTitle>
-      <CardSubtitle>
-        {agents.length === 0 && workspaces.length === 0
-          ? "Connect agents and create workspaces to see them here."
-          : `${agents.length} agent${agents.length === 1 ? "" : "s"} connected${activeAgents > 0 ? ` (${activeAgents} active)` : ""} \u00B7 ${workspaces.length} workspace${workspaces.length === 1 ? "" : "s"}`}
-      </CardSubtitle>
+      <CardHeader>
+        <CardHeading>
+          <CardTitle>Live Topology</CardTitle>
+          <CardSubtitle>
+            {sortedAgents.length === 0 && sortedWorkspaces.length === 0
+              ? "Connect agents and mount Agent Workspaces or Volumes to see them here."
+              : `${sortedAgents.length} agent${sortedAgents.length === 1 ? "" : "s"} connected${activeAgents > 0 ? ` (${activeAgents} active)` : ""} \u00B7 ${workspaceMountSummary} \u00B7 ${mountedVolumeCount} mounted volume${mountedVolumeCount === 1 ? "" : "s"}`}
+          </CardSubtitle>
+        </CardHeading>
+      </CardHeader>
 
       <Topology ref={topologyRef}>
         {/* SVG lines overlay */}
@@ -1147,33 +1524,33 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
           ) : null}
         </HubWrap>
 
-        {/* ── Right: Databases / Workspaces ── */}
+        {/* ── Right: Agent Workspaces with attached volumes ── */}
         <Column $align="stretch" $justify="center">
-          <ColumnLabel $align="right">Databases / Workspaces</ColumnLabel>
+          <ColumnLabel $align="right">Workspaces</ColumnLabel>
           {visibleWorkspaces.length === 0 ? (
-            <EmptyColumn>No workspaces yet</EmptyColumn>
+            <EmptyColumn>No Agent Workspaces or mounted volumes yet</EmptyColumn>
           ) : (
-            workspaceGroups.map((group) => (
-              <DatabaseGroup key={group.databaseId || "_no_database"}>
-                <DatabaseGroupHeader>
-                  <DatabaseIcon customSize={14} />
-                  <DatabaseGroupName title={group.databaseName}>
-                    {group.databaseName}
-                  </DatabaseGroupName>
-                </DatabaseGroupHeader>
-                {group.rows.map(({ ws, presence, visibleIndex: i }) => {
-                  const workspaceLabel = displayWorkspaceName(ws.name);
-                  const highlighted = workspaceIsHighlighted(ws, hoveredItem);
-                  return (
-                    <WorkspaceNode
-                      key={ws.id}
-                      $i={i}
-                      $presence={presence}
-                      $highlighted={highlighted}
-                      data-highlighted={highlighted}
+            <>
+              {workspaceRows.map(({ ws, presence, visibleIndex: i }) => {
+                const workspaceLabel = displayWorkspaceName(ws.name);
+                const highlighted = workspaceIsHighlighted(ws, hoveredItem);
+                const volumes = workspaceVolumesByWorkspaceId.get(ws.id) ?? [];
+                return (
+                  <WorkspaceTargetGroup
+                    key={ws.id}
+                    $i={i}
+                    $presence={presence}
+                    $highlighted={highlighted}
+                    data-highlighted={highlighted}
+                    ref={(el) => {
+                      wsRefs.current[i] = el;
+                    }}
+                  >
+                    <WorkspaceGroupHeaderButton
                       type="button"
-                      aria-label={`Open workspace ${workspaceLabel}`}
-                      title={`Open workspace ${workspaceLabel}`}
+                      $highlighted={highlighted}
+                      aria-label={`Open Agent Workspace ${workspaceLabel}`}
+                      title={`Open Agent Workspace ${workspaceLabel}`}
                       onMouseEnter={() => {
                         setHoveredItem({ kind: "workspace", id: ws.id });
                       }}
@@ -1187,31 +1564,121 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
                         setHoveredItem(null);
                       }}
                       onClick={() => {
-                        void navigate({
-                          to: "/workspaces/$workspaceId",
-                          params: { workspaceId: ws.id },
-                          search: { databaseId: ws.databaseId },
-                        });
-                      }}
-                      ref={(el) => {
-                        wsRefs.current[i] = el;
+                        openTopologyTarget(navigate, ws);
                       }}
                     >
-                      <NodeIconBox title="Workspace">
-                        <FoldersIcon customSize={18} />
-                      </NodeIconBox>
-                      <WorkspaceMeta>
-                        <WorkspaceName>{workspaceLabel}</WorkspaceName>
-                        <WorkspaceFiles>
-                          {ws.fileCount} file{ws.fileCount === 1 ? "" : "s"} ·
-                          {" "}Size: {formatBytes(ws.totalBytes)}
-                        </WorkspaceFiles>
-                      </WorkspaceMeta>
-                    </WorkspaceNode>
-                  );
-                })}
-              </DatabaseGroup>
-            ))
+                      <BotIcon customSize={14} />
+                      <DatabaseGroupName>{workspaceLabel}</DatabaseGroupName>
+                      <TargetCount>{volumes.length}</TargetCount>
+                    </WorkspaceGroupHeaderButton>
+                    {volumes.length === 0 ? (
+                      <WorkspaceGroupEmpty>No volumes attached</WorkspaceGroupEmpty>
+                    ) : (
+                      volumes.map((volume) => {
+                        const volumeLabel = displayWorkspaceName(volume.name);
+                        const volumeHighlighted = volumeIsHighlighted(volume, hoveredItem);
+                        return (
+                          <VolumeNode
+                            key={volume.id}
+                            $highlighted={volumeHighlighted}
+                            data-highlighted={volumeHighlighted}
+                            type="button"
+                            aria-label={`Open volume ${volumeLabel}`}
+                            title={`Open volume ${volumeLabel}`}
+                            onMouseEnter={() => {
+                              setHoveredItem({
+                                kind: "volume",
+                                id: volume.id,
+                                workspaceId: volume.workspaceId,
+                              });
+                            }}
+                            onMouseLeave={() => {
+                              setHoveredItem(null);
+                            }}
+                            onFocus={() => {
+                              setHoveredItem({
+                                kind: "volume",
+                                id: volume.id,
+                                workspaceId: volume.workspaceId,
+                              });
+                            }}
+                            onBlur={() => {
+                              setHoveredItem(null);
+                            }}
+                            onClick={() => {
+                              void navigate({
+                                to: "/volumes/$volumeId",
+                                params: { volumeId: volume.volumeId },
+                                search: volume.databaseId ? { databaseId: volume.databaseId } : {},
+                              });
+                            }}
+                          >
+                            <NodeIconBox $active title="Volume">
+                              <FoldersIcon customSize={18} />
+                            </NodeIconBox>
+                            <WorkspaceMeta>
+                              <WorkspaceName>{volumeLabel}</WorkspaceName>
+                              <WorkspaceFiles>{volumeDetail(volume)}</WorkspaceFiles>
+                            </WorkspaceMeta>
+                          </VolumeNode>
+                        );
+                      })
+                    )}
+                  </WorkspaceTargetGroup>
+                );
+              })}
+              {directVolumeRows.length > 0 ? (
+                <DatabaseGroup>
+                  <DatabaseGroupHeader>
+                    <FoldersIcon customSize={14} />
+                    <DatabaseGroupName>Mounted Volumes</DatabaseGroupName>
+                    <TargetCount>{directVolumeRows.length}</TargetCount>
+                  </DatabaseGroupHeader>
+                  {directVolumeRows.map(({ ws, presence, visibleIndex: i }) => {
+                    const workspaceLabel = displayWorkspaceName(ws.name);
+                    const highlighted = workspaceIsHighlighted(ws, hoveredItem);
+                    return (
+                      <WorkspaceNode
+                        key={ws.id}
+                        $i={i}
+                        $presence={presence}
+                        $highlighted={highlighted}
+                        data-highlighted={highlighted}
+                        type="button"
+                        aria-label={`Open ${targetKindLabel(ws.kind)} ${workspaceLabel}`}
+                        title={`Open ${targetKindLabel(ws.kind)} ${workspaceLabel}`}
+                        onMouseEnter={() => {
+                          setHoveredItem({ kind: "workspace", id: ws.id });
+                        }}
+                        onMouseLeave={() => {
+                          setHoveredItem(null);
+                        }}
+                        onFocus={() => {
+                          setHoveredItem({ kind: "workspace", id: ws.id });
+                        }}
+                        onBlur={() => {
+                          setHoveredItem(null);
+                        }}
+                        onClick={() => {
+                          openTopologyTarget(navigate, ws);
+                        }}
+                        ref={(el) => {
+                          wsRefs.current[i] = el;
+                        }}
+                      >
+                        <NodeIconBox title={targetKindLabel(ws.kind)}>
+                          <FoldersIcon customSize={18} />
+                        </NodeIconBox>
+                        <WorkspaceMeta>
+                          <WorkspaceName>{workspaceLabel}</WorkspaceName>
+                          <WorkspaceFiles>{targetDetail(ws)}</WorkspaceFiles>
+                        </WorkspaceMeta>
+                      </WorkspaceNode>
+                    );
+                  })}
+                </DatabaseGroup>
+              ) : null}
+            </>
           )}
         </Column>
       </Topology>
@@ -1229,9 +1696,14 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
           onClose={() => setSelectedAgent(null)}
           onOpenWorkspace={(agent) => {
             setSelectedAgent(null);
+            const target = targetById.get(agent.workspaceId);
+            if (target != null) {
+              openTopologyTarget(navigate, target);
+              return;
+            }
             void navigate({
-              to: "/workspaces/$workspaceId",
-              params: { workspaceId: agent.workspaceId },
+              to: "/volumes/$volumeId",
+              params: { volumeId: agent.workspaceId },
               search: agent.databaseId ? { databaseId: agent.databaseId } : {},
             });
           }}

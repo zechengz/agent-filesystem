@@ -16,15 +16,25 @@ const (
 	mcpAccessTokenPrefix       = "afs_mcp"
 	mcpControlPlaneTokenPrefix = "afs_cp"
 
+	mcpScopeVolumePrefix    = "volume:"
 	mcpScopeWorkspacePrefix = "workspace:"
+	mcpScopeDatabasePrefix  = "database:"
 	mcpScopeControlPlane    = "control-plane"
 )
 
 var ErrMCPAccessTokenInvalid = errors.New("mcp access token is invalid or expired")
 
-// workspaceScope builds the scope string for a workspace-bound token.
+func volumeScope(volumeID string) string {
+	return mcpScopeVolumePrefix + strings.TrimSpace(volumeID)
+}
+
+// workspaceScope builds the legacy scope string for older workspace-bound tokens.
 func workspaceScope(workspaceID string) string {
 	return mcpScopeWorkspacePrefix + strings.TrimSpace(workspaceID)
+}
+
+func databaseScope(databaseID string) string {
+	return mcpScopeDatabasePrefix + strings.TrimSpace(databaseID)
 }
 
 // isControlPlaneScope reports whether a scope string names the control-plane scope.
@@ -41,6 +51,7 @@ type mcpAccessTokenRecord struct {
 	WorkspaceID   string `json:"workspace_id,omitempty"`
 	WorkspaceName string `json:"workspace_name,omitempty"`
 	Scope         string `json:"scope"`
+	Capability    string `json:"capability,omitempty"`
 	Profile       string `json:"profile,omitempty"`
 	TemplateSlug  string `json:"template_slug,omitempty"`
 	Readonly      bool   `json:"readonly,omitempty"`
@@ -59,6 +70,7 @@ type mcpAccessTokenResponse struct {
 	WorkspaceID   string `json:"workspace_id,omitempty"`
 	WorkspaceName string `json:"workspace_name,omitempty"`
 	Scope         string `json:"scope"`
+	Capability    string `json:"capability,omitempty"`
 	Profile       string `json:"profile,omitempty"`
 	TemplateSlug  string `json:"template_slug,omitempty"`
 	Readonly      bool   `json:"readonly,omitempty"`
@@ -71,6 +83,8 @@ type mcpAccessTokenResponse struct {
 
 type createMCPAccessTokenRequest struct {
 	Name         string `json:"name"`
+	Scope        string `json:"scope,omitempty"`
+	Capability   string `json:"capability,omitempty"`
 	Profile      string `json:"profile,omitempty"`
 	TemplateSlug string `json:"template_slug,omitempty"`
 	Readonly     bool   `json:"readonly,omitempty"`
@@ -152,9 +166,29 @@ func (m *DatabaseManager) createMCPAccessTokenRecord(ctx context.Context, subjec
 	if profileInput == "" && input.Readonly {
 		profileInput = MCPProfileWorkspaceRO
 	}
-	profile, err := NormalizeMCPProfile(profileInput)
+	scope := strings.TrimSpace(input.Scope)
+	if scope == "" {
+		scope = volumeScope(workspaceID)
+	}
+	capabilityInput := strings.TrimSpace(input.Capability)
+	if capabilityInput == "" && profileInput != "" {
+		capabilityInput = MCPCapabilityFromProfile(profileInput)
+	}
+	capability, err := NormalizeMCPCapability(capabilityInput)
 	if err != nil {
 		return mcpAccessTokenResponse{}, err
+	}
+	profile := profileInput
+	if profile == "" {
+		profile = MCPProfileFromCapability(scope, capability)
+	} else {
+		profile, err = NormalizeMCPProfile(profile)
+		if err != nil {
+			return mcpAccessTokenResponse{}, err
+		}
+		if strings.TrimSpace(input.Capability) == "" {
+			capability = MCPCapabilityFromProfile(profile)
+		}
 	}
 	record := mcpAccessTokenRecord{
 		ID:            tokenID,
@@ -164,7 +198,8 @@ func (m *DatabaseManager) createMCPAccessTokenRecord(ctx context.Context, subjec
 		DatabaseID:    strings.TrimSpace(databaseID),
 		WorkspaceID:   strings.TrimSpace(workspaceID),
 		WorkspaceName: strings.TrimSpace(workspaceName),
-		Scope:         workspaceScope(workspaceID),
+		Scope:         scope,
+		Capability:    capability,
 		Profile:       profile,
 		TemplateSlug:  strings.TrimSpace(input.TemplateSlug),
 		Readonly:      MCPProfileIsReadonly(profile),
@@ -210,6 +245,8 @@ func (m *DatabaseManager) CreateControlPlaneMCPAccessToken(ctx context.Context, 
 		OwnerSubject: strings.TrimSpace(subject),
 		OwnerLabel:   strings.TrimSpace(label),
 		Scope:        mcpScopeControlPlane,
+		Capability:   MCPCapabilityAdmin,
+		Profile:      MCPProfileAdminRW,
 		SecretHash:   hashMCPAccessTokenSecret(secret),
 		Secret:       formatControlPlaneMCPAccessToken(tokenID, secret),
 		CreatedAt:    now.Format(timeRFC3339),
@@ -446,6 +483,7 @@ func mcpAccessTokenResponseFromRecord(record mcpAccessTokenRecord) mcpAccessToke
 		WorkspaceID:   record.WorkspaceID,
 		WorkspaceName: record.WorkspaceName,
 		Scope:         record.Scope,
+		Capability:    firstNonEmpty(record.Capability, MCPCapabilityFromProfile(record.Profile)),
 		Profile:       record.Profile,
 		TemplateSlug:  record.TemplateSlug,
 		Readonly:      record.Readonly,

@@ -1,472 +1,397 @@
-import { Button, Typography } from "@redis-ui/components";
-import { Table } from "@redis-ui/table";
-import type { ColumnDef } from "@redis-ui/table";
-import { useMemo, useState } from "react";
+import { Button, Select } from "@redis-ui/components";
+import { useNavigate } from "@tanstack/react-router";
+import { Plus } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import styled from "styled-components";
-import { Tag } from "../../../components/afs-kit";
-import * as S from "../../../foundation/tables/workspace-table.styles";
-import { AgentProfileDrawer } from "./AgentProfileDrawer";
 import {
-  initialAgents,
-  profilePalette,
-  sampleFilesystems,
-  sampleTokens,
-} from "./sample-data";
-import type { AgentProfile } from "./types";
-
-type ViewMode = "table" | "cards";
-
-function newDraftId(): string {
-  return "new_" + Math.random().toString(36).slice(2, 7);
-}
-
-function newAgentId(): string {
-  return "agt_" + Math.random().toString(36).slice(2, 8);
-}
+  DialogActions,
+  DialogBody,
+  DialogCard,
+  DialogCloseButton,
+  DialogError,
+  DialogHeader,
+  DialogOverlay,
+  DialogTitle,
+  Field,
+  FormGrid,
+  TextInput,
+} from "../../../components/afs-kit";
+import { formatBytes } from "../../../foundation/api/afs";
+import {
+  useDatabaseScope,
+  useScopedWorkspaceSummaries,
+} from "../../../foundation/database-scope";
+import {
+  useCreateWorkspaceCompositionMutation,
+  useWorkspaceCompositions,
+} from "../../../foundation/hooks/use-afs";
+import { WorkspaceCompositionTable } from "../../../foundation/tables/workspace-composition-table";
+import type { AFSWorkspaceCompositionSummary } from "../../../foundation/types/afs";
+import type { MountMode, WorkspaceOption } from "./types";
 
 export function AgentProfilesTab() {
-  const [agents, setAgents] = useState<AgentProfile[]>(initialAgents);
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [isNew, setIsNew] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("table");
-  const [search, setSearch] = useState("");
+  const navigate = useNavigate();
+  const workspacesQuery = useWorkspaceCompositions();
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
-  const visibleAgents = useMemo(
-    () => agents.filter((a) => !a.draft),
-    [agents],
-  );
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return visibleAgents;
-    return visibleAgents.filter(
-      (a) =>
-        a.name.toLowerCase().includes(q) ||
-        a.id.toLowerCase().includes(q) ||
-        a.description.toLowerCase().includes(q),
-    );
-  }, [visibleAgents, search]);
-
-  const openAgent = useMemo(() => {
-    if (!openId) return null;
-    return agents.find((a) => a.id === openId) ?? null;
-  }, [openId, agents]);
-
-  function startCreate() {
-    const id = newDraftId();
-    const draft: AgentProfile = {
-      id,
-      name: "",
-      description: "",
-      letter: "A",
-      color: profilePalette[agents.length % profilePalette.length],
-      status: "idle",
-      sharedCount: 0,
-      perRunCount: 0,
-      tokens: 0,
-      lastActive: "never",
-      draft: true,
-    };
-    setAgents((prev) => [draft, ...prev]);
-    sampleFilesystems[id] = { shared: [], perRun: [] };
-    sampleTokens[id] = [];
-    setOpenId(id);
-    setIsNew(true);
+  function openWorkspace(workspace: AFSWorkspaceCompositionSummary) {
+    void navigate({
+      to: "/workspaces/$workspaceId",
+      params: { workspaceId: workspace.id },
+    });
   }
-
-  function saveAgent(updated: AgentProfile) {
-    if (isNew) {
-      const realId = newAgentId();
-      setAgents((prev) =>
-        prev.map((a) =>
-          a.id === updated.id
-            ? { ...updated, id: realId, draft: false }
-            : a,
-        ),
-      );
-      sampleFilesystems[realId] = sampleFilesystems[updated.id] ?? {
-        shared: [],
-        perRun: [],
-      };
-      sampleTokens[realId] = sampleTokens[updated.id] ?? [];
-      setIsNew(false);
-      setOpenId(null);
-    } else {
-      setAgents((prev) =>
-        prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)),
-      );
-      setOpenId(null);
-    }
-  }
-
-  function closeDrawer() {
-    if (isNew && openAgent && openAgent.draft) {
-      setAgents((prev) => prev.filter((a) => a.id !== openAgent.id));
-    }
-    setOpenId(null);
-    setIsNew(false);
-  }
-
-  function deleteAgent(id: string) {
-    setAgents((prev) => prev.filter((a) => a.id !== id));
-    setOpenId(null);
-    setIsNew(false);
-  }
-
-  const columns = useMemo(
-    () =>
-      [
-        {
-          accessorKey: "name",
-          header: "Profile",
-          size: 280,
-          enableSorting: false,
-          cell: ({ row }) => {
-            const a = row.original;
-            return (
-              <NameCell>
-                <Avatar style={{ background: a.color }}>{a.letter}</Avatar>
-                <NameText>
-                  <strong>{a.name || "Unnamed profile"}</strong>
-                  <span title={a.description || a.id}>
-                    {a.description || a.id}
-                  </span>
-                </NameText>
-              </NameCell>
-            );
-          },
-        },
-        {
-          accessorKey: "filesystem",
-          header: "Filesystem",
-          size: 160,
-          enableSorting: false,
-          cell: ({ row }) => {
-            const a = row.original;
-            const total = a.sharedCount + a.perRunCount;
-            return (
-              <Typography.Body component="span">
-                {total} {total === 1 ? "workspace" : "workspaces"}
-              </Typography.Body>
-            );
-          },
-        },
-        {
-          accessorKey: "tokens",
-          header: "Tokens",
-          size: 130,
-          enableSorting: false,
-          cell: ({ row }) => {
-            const a = row.original;
-            return a.tokens > 0 ? (
-              <Typography.Body component="span">
-                {a.tokens} active
-              </Typography.Body>
-            ) : (
-              <Typography.Body component="span" color="secondary">
-                no tokens
-              </Typography.Body>
-            );
-          },
-        },
-        {
-          accessorKey: "status",
-          header: "Status",
-          size: 130,
-          enableSorting: false,
-          cell: ({ row }) => {
-            const a = row.original;
-            return (
-              <StatusPill>
-                <StatusDot $live={a.status === "live"} />
-                {a.status === "live" ? "Connected" : "Idle"}
-              </StatusPill>
-            );
-          },
-        },
-        {
-          accessorKey: "lastActive",
-          header: "Last active",
-          size: 140,
-          enableSorting: false,
-          cell: ({ row }) => (
-            <Typography.Body component="span" color="secondary">
-              {row.original.lastActive}
-            </Typography.Body>
-          ),
-        },
-      ] as ColumnDef<AgentProfile>[],
-    [],
-  );
-
-  const isFiltering = search.trim().length > 0;
 
   return (
     <>
-      <S.TableBlock>
-        <S.HeadingWrap style={{ padding: 0 }}>
-          <S.SearchInput
-            value={search}
-            onChange={setSearch}
-            placeholder="Search profiles by name, ID, or description..."
-          />
-          <S.ToggleGroup>
-            <S.ToggleButton
-              $active={viewMode === "cards"}
-              aria-pressed={viewMode === "cards"}
-              onClick={() => setViewMode("cards")}
-            >
-              Cards
-            </S.ToggleButton>
-            <S.ToggleButton
-              $active={viewMode === "table"}
-              aria-pressed={viewMode === "table"}
-              onClick={() => setViewMode("table")}
-            >
-              Table
-            </S.ToggleButton>
-          </S.ToggleGroup>
-          <Button size="medium" onClick={startCreate}>
-            New agent profile
+      <WorkspaceCompositionTable
+        rows={workspacesQuery.data ?? []}
+        loading={workspacesQuery.isLoading}
+        error={workspacesQuery.isError}
+        onOpenWorkspace={openWorkspace}
+        toolbarAction={
+          <Button size="medium" onClick={() => setCreateDialogOpen(true)}>
+            <Plus size={16} strokeWidth={2} aria-hidden="true" />
+            &nbsp;Add Agent Workspace
           </Button>
-        </S.HeadingWrap>
-
-        {visibleAgents.length === 0 ? (
-          <S.EmptyState>
-            <Typography.Heading
-              component="h3"
-              size="XS"
-              style={{ margin: 0 }}
-            >
-              No agent profiles yet
-            </Typography.Heading>
-            <Typography.Body
-              color="secondary"
-              component="p"
-              style={{ margin: "8px auto 14px", maxWidth: 460 }}
-            >
-              An agent profile says &ldquo;this is the coding agent, here are
-              the files it can see.&rdquo; Set one up to give an agent a
-              filesystem and a token to connect with.
-            </Typography.Body>
-            <Button size="medium" onClick={startCreate}>
-              New agent profile
-            </Button>
-          </S.EmptyState>
-        ) : filtered.length === 0 ? (
-          <S.EmptyState>
-            {isFiltering
-              ? "No profiles match the current filter."
-              : "No profiles yet."}
-          </S.EmptyState>
-        ) : viewMode === "table" ? (
-          <S.TableCard>
-            <S.DenseTableViewport>
-              <Table
-                columns={columns}
-                data={filtered}
-                getRowId={(row) => row.id}
-                onRowClick={(row) => {
-                  setOpenId(row.id);
-                  setIsNew(false);
-                }}
-                stripedRows
-              />
-            </S.DenseTableViewport>
-          </S.TableCard>
-        ) : (
-          <CardGrid>
-            {filtered.map((a) => (
-              <ProfileCard
-                key={a.id}
-                onClick={() => {
-                  setOpenId(a.id);
-                  setIsNew(false);
-                }}
-              >
-                <CardHead>
-                  <Avatar style={{ background: a.color }}>{a.letter}</Avatar>
-                  <CardHeadText>
-                    <strong>{a.name || "Unnamed profile"}</strong>
-                    <CardId>{a.id}</CardId>
-                  </CardHeadText>
-                  <StatusPill>
-                    <StatusDot $live={a.status === "live"} />
-                    {a.status === "live" ? "Connected" : "Idle"}
-                  </StatusPill>
-                </CardHead>
-                <CardDescription>
-                  {a.description ||
-                    "No description yet. Open this profile to add one."}
-                </CardDescription>
-                <CardTags>
-                  <Tag>{a.sharedCount} shared</Tag>
-                  <Tag>{a.perRunCount} per-run</Tag>
-                  <Tag>
-                    {a.tokens > 0
-                      ? `${a.tokens} ${a.tokens === 1 ? "token" : "tokens"}`
-                      : "no tokens"}
-                  </Tag>
-                </CardTags>
-                <CardFoot>last active &middot; {a.lastActive}</CardFoot>
-              </ProfileCard>
-            ))}
-          </CardGrid>
-        )}
-      </S.TableBlock>
-
-      {openAgent != null ? (
-        <AgentProfileDrawer
-          agent={openAgent}
-          isNew={isNew}
-          onClose={closeDrawer}
-          onSave={saveAgent}
-          onDelete={deleteAgent}
-        />
-      ) : null}
+        }
+      />
+      <CreateAgentWorkspaceDialog
+        open={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+      />
     </>
   );
 }
 
-const NameCell = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-`;
+type CreateDialogProps = {
+  open: boolean;
+  onClose: () => void;
+};
 
-const Avatar = styled.div`
-  width: 32px;
-  height: 32px;
-  flex: 0 0 32px;
-  border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-weight: 700;
-  font-size: 13px;
-`;
+function mountPathForVolume(name: string) {
+  return "/" + name.trim().replace(/^\/+/, "").replace(/\s+/g, "-");
+}
 
-const NameText = styled.div`
-  min-width: 0;
+function CreateAgentWorkspaceDialog({ open, onClose }: CreateDialogProps) {
+  const { databases } = useDatabaseScope();
+  const volumesQuery = useScopedWorkspaceSummaries();
+  const createWorkspace = useCreateWorkspaceCompositionMutation();
+
+  const volumeOptions = useMemo<WorkspaceOption[]>(
+    () =>
+      volumesQuery.data.map((volume) => ({
+        id: volume.id,
+        name: volume.name,
+        files: volume.fileCount,
+        size: volume.totalBytes === 0 ? "0 KB" : formatBytes(volume.totalBytes),
+      })),
+    [volumesQuery.data],
+  );
+
+  const eligibleDatabases = useMemo(
+    () => databases.filter((database) => database.canCreateWorkspaces),
+    [databases],
+  );
+  const defaultDatabase = eligibleDatabases.find((database) => database.isDefault);
+  const defaultDatabaseId =
+    defaultDatabase != null
+      ? defaultDatabase.id
+      : eligibleDatabases.length > 0
+        ? eligibleDatabases[0].id
+        : "";
+
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [databaseId, setDatabaseId] = useState("");
+  const [selectedVolumeIds, setSelectedVolumeIds] = useState<string[]>([]);
+  const [mountMode, setMountMode] = useState<MountMode>("r");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setName("");
+    setDescription("");
+    setSelectedVolumeIds([]);
+    setMountMode("r");
+    setFormError(null);
+    setDatabaseId(defaultDatabaseId);
+  }, [defaultDatabaseId, open]);
+
+  if (!open) return null;
+
+  const busy = createWorkspace.isPending;
+
+  function closeDialog() {
+    if (busy) return;
+    onClose();
+  }
+
+  function toggleVolume(volumeId: string) {
+    setSelectedVolumeIds((current) =>
+      current.includes(volumeId)
+        ? current.filter((id) => id !== volumeId)
+        : [...current, volumeId],
+    );
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+
+    const trimmedName = name.trim();
+    if (trimmedName === "") {
+      setFormError("Agent Workspace name is required.");
+      return;
+    }
+
+    setFormError(null);
+    try {
+      await createWorkspace.mutateAsync({
+        name: trimmedName,
+        description: description.trim() || undefined,
+        databaseId: databaseId || undefined,
+        mounts: selectedVolumeIds.flatMap((volumeId) => {
+          const volume = volumeOptions.find((item) => item.id === volumeId);
+          if (volume == null) return [];
+          return [
+            {
+              volumeId: volume.id,
+              volumeName: volume.name,
+              mountPath: mountPathForVolume(volume.name),
+              readonly: mountMode === "r",
+            },
+          ];
+        }),
+      });
+      onClose();
+    } catch (error) {
+      setFormError(
+        error instanceof Error
+          ? error.message
+          : "Unable to create the Agent Workspace.",
+      );
+    }
+  }
+
+  const submitLabel =
+    selectedVolumeIds.length === 0
+      ? "Create Agent Workspace"
+      : selectedVolumeIds.length === 1
+        ? "Create with 1 volume"
+        : `Create with ${selectedVolumeIds.length} volumes`;
+
+  return (
+    <DialogOverlay
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="create-agent-workspace-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) closeDialog();
+      }}
+    >
+      <DialogCard>
+        <DialogHeader>
+          <div>
+            <DialogTitle id="create-agent-workspace-title">
+              Add Agent Workspace
+            </DialogTitle>
+            <DialogBody>
+              Name the workspace, then optionally mount existing volumes at
+              creation.
+            </DialogBody>
+          </div>
+          <DialogCloseButton
+            type="button"
+            aria-label="Close"
+            onClick={closeDialog}
+          >
+            &times;
+          </DialogCloseButton>
+        </DialogHeader>
+
+        <FormGrid onSubmit={submit}>
+          <Field>
+            Name
+            <TextInput
+              autoFocus
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="coding-agent"
+            />
+          </Field>
+
+          <Field>
+            Description
+            <TextInput
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="What this agent can read and write. (optional)"
+            />
+          </Field>
+
+          {eligibleDatabases.length > 1 ? (
+            <Field>
+              Database
+              <Select
+                options={eligibleDatabases.map((database) => ({
+                  value: database.id,
+                  label: `${database.displayName || database.databaseName}${database.isDefault ? " (default)" : ""}`,
+                }))}
+                value={databaseId}
+                onChange={(next) => setDatabaseId(next)}
+              />
+            </Field>
+          ) : null}
+
+          <Field>
+            Initial volumes
+            {volumeOptions.length === 0 ? (
+              <EmptyVolumes>
+                No volumes are available yet. Create this Agent Workspace now and
+                add volumes later.
+              </EmptyVolumes>
+            ) : (
+              <VolumeList>
+                {volumeOptions.map((volume) => {
+                  const selected = selectedVolumeIds.includes(volume.id);
+                  return (
+                    <VolumeOption key={volume.id} $selected={selected}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        aria-label={`Select ${volume.name}`}
+                        onChange={() => toggleVolume(volume.id)}
+                      />
+                      <VolumeOptionMain>
+                        <VolumeName>/{volume.name}</VolumeName>
+                        <VolumeMeta>
+                          {volume.name} &middot; {volume.id}
+                        </VolumeMeta>
+                      </VolumeOptionMain>
+                      <VolumeStats>
+                        {volume.files.toLocaleString()} files &middot; {volume.size}
+                      </VolumeStats>
+                    </VolumeOption>
+                  );
+                })}
+              </VolumeList>
+            )}
+          </Field>
+
+          <Field>
+            Permissions
+            <Select
+              options={[
+                { value: "r", label: "Read only" },
+                { value: "rw", label: "Read / write" },
+              ]}
+              value={mountMode}
+              onChange={(value) => setMountMode(value as MountMode)}
+            />
+          </Field>
+
+          {formError ? <DialogError role="alert">{formError}</DialogError> : null}
+
+          <DialogActions style={{ justifyContent: "flex-end" }}>
+            <Button
+              size="medium"
+              type="button"
+              variant="secondary-fill"
+              onClick={closeDialog}
+              disabled={busy}
+            >
+              Cancel
+            </Button>
+            <Button size="medium" type="submit" disabled={busy}>
+              {busy ? "Creating..." : submitLabel}
+            </Button>
+          </DialogActions>
+        </FormGrid>
+      </DialogCard>
+    </DialogOverlay>
+  );
+}
+
+const VolumeList = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 2px;
-
-  strong {
-    color: var(--afs-ink);
-    font-size: 14px;
-    font-weight: 700;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  span {
-    color: var(--afs-muted);
-    font-size: 12px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+  gap: 8px;
+  max-height: 300px;
+  overflow: auto;
+  padding-right: 4px;
 `;
 
-const StatusPill = styled.span`
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--afs-line);
-  background: var(--afs-panel);
-  color: var(--afs-ink-soft);
-  font-size: 12px;
-  font-weight: 600;
-`;
-
-const StatusDot = styled.span<{ $live: boolean }>`
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: ${({ $live }) => ($live ? "#10b981" : "#a1a1aa")};
-  ${({ $live }) =>
-    $live ? "box-shadow: 0 0 0 3px rgba(16,185,129,0.16);" : ""}
-`;
-
-const CardGrid = styled.div`
+const VolumeOption = styled.label<{ $selected: boolean }>`
   display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fill, minmax(max(28%, 320px), 1fr));
-`;
-
-const ProfileCard = styled.button`
-  display: flex;
-  flex-direction: column;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
-  padding: 18px;
-  border-radius: 14px;
-  border: 1px solid var(--afs-line);
-  background: var(--afs-panel-strong);
-  text-align: left;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid
+    ${({ $selected }) =>
+      $selected ? "var(--afs-selection-border)" : "var(--afs-line)"};
+  border-radius: 8px;
+  background: ${({ $selected }) =>
+    $selected ? "var(--afs-selection-bg)" : "var(--afs-panel)"};
+  color: ${({ $selected }) => ($selected ? "var(--afs-selection-text)" : "var(--afs-ink)")};
   cursor: pointer;
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 
   &:hover {
-    border-color: var(--afs-line-strong);
-    box-shadow: 0 8px 24px rgba(8, 6, 13, 0.08);
-    transform: translateY(-2px);
+    border-color: var(--afs-selection-border);
+    background: ${({ $selected }) => ($selected ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
+    color: ${({ $selected }) => ($selected ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
+  }
+
+  input {
+    accent-color: var(--afs-accent);
+  }
+
+  @media (max-width: 560px) {
+    grid-template-columns: auto minmax(0, 1fr);
   }
 `;
 
-const CardHead = styled.div`
+const VolumeOptionMain = styled.span`
   display: flex;
-  align-items: center;
-  gap: 12px;
   min-width: 0;
-`;
-
-const CardHeadText = styled.div`
-  flex: 1;
-  min-width: 0;
-  display: flex;
   flex-direction: column;
   gap: 2px;
+`;
 
-  strong {
-    color: var(--afs-ink);
-    font-size: 14.5px;
-    font-weight: 700;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+const VolumeName = styled.span`
+  color: var(--afs-ink);
+  font-family: var(--afs-mono, monospace);
+  font-size: 13.5px;
+  font-weight: 700;
+`;
+
+const VolumeMeta = styled.span`
+  min-width: 0;
+  color: var(--afs-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const VolumeStats = styled.span`
+  color: var(--afs-muted);
+  font-size: 12px;
+  white-space: nowrap;
+
+  @media (max-width: 560px) {
+    grid-column: 2;
+    white-space: normal;
   }
 `;
 
-const CardId = styled.span`
+const EmptyVolumes = styled.div`
+  padding: 18px 14px;
+  border: 1px solid var(--afs-line);
+  border-radius: 8px;
   color: var(--afs-muted);
-  font-size: 12px;
-  font-family: var(--afs-mono, monospace);
-`;
-
-const CardDescription = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
+  background: var(--afs-panel);
   font-size: 13px;
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-`;
-
-const CardTags = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-`;
-
-const CardFoot = styled.span`
-  color: var(--afs-muted);
-  font-size: 12px;
 `;

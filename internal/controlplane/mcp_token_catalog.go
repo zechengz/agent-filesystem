@@ -18,14 +18,14 @@ func (c *workspaceCatalog) CreateMCPAccessToken(ctx context.Context, item mcpAcc
 	if strings.TrimSpace(item.SecretHash) == "" {
 		return fmt.Errorf("mcp token secret hash is required")
 	}
-	// Workspace-scoped tokens require a workspace binding. Control-plane tokens
-	// intentionally leave database_id/workspace_id empty.
-	if strings.HasPrefix(item.Scope, mcpScopeWorkspacePrefix) {
+	// Volume/workspace-scoped tokens require a bound content tree. Control-plane
+	// tokens intentionally leave database_id/workspace_id empty.
+	if strings.HasPrefix(item.Scope, mcpScopeVolumePrefix) || strings.HasPrefix(item.Scope, mcpScopeWorkspacePrefix) {
 		if strings.TrimSpace(item.DatabaseID) == "" {
-			return fmt.Errorf("mcp token database is required for workspace scope")
+			return fmt.Errorf("mcp token database is required for volume scope")
 		}
 		if strings.TrimSpace(item.WorkspaceID) == "" {
-			return fmt.Errorf("mcp token workspace is required for workspace scope")
+			return fmt.Errorf("mcp token workspace is required for volume scope")
 		}
 	}
 	_, err := c.execContext(ctx, c.rebind(`INSERT INTO mcp_access_tokens (
@@ -37,6 +37,7 @@ func (c *workspaceCatalog) CreateMCPAccessToken(ctx context.Context, item mcpAcc
 		workspace_id,
 		workspace_name,
 		scope,
+		capability,
 		profile,
 		template_slug,
 		readonly,
@@ -46,7 +47,7 @@ func (c *workspaceCatalog) CreateMCPAccessToken(ctx context.Context, item mcpAcc
 		last_used_at,
 		expires_at,
 		revoked_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		strings.TrimSpace(item.ID),
 		strings.TrimSpace(item.Name),
 		strings.TrimSpace(item.OwnerSubject),
@@ -55,6 +56,7 @@ func (c *workspaceCatalog) CreateMCPAccessToken(ctx context.Context, item mcpAcc
 		strings.TrimSpace(item.WorkspaceID),
 		strings.TrimSpace(item.WorkspaceName),
 		strings.TrimSpace(item.Scope),
+		strings.TrimSpace(item.Capability),
 		strings.TrimSpace(item.Profile),
 		strings.TrimSpace(item.TemplateSlug),
 		boolToCatalogInt(item.Readonly),
@@ -77,6 +79,7 @@ const mcpAccessTokenSelectColumns = `
 		workspace_id,
 		workspace_name,
 		scope,
+		capability,
 		profile,
 		template_slug,
 		readonly,
@@ -209,6 +212,7 @@ func scanMCPAccessTokenRows(rows *sql.Rows) ([]mcpAccessTokenRecord, error) {
 			&item.WorkspaceID,
 			&item.WorkspaceName,
 			&item.Scope,
+			&item.Capability,
 			&item.Profile,
 			&item.TemplateSlug,
 			&readonly,

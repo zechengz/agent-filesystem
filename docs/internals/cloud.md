@@ -30,6 +30,11 @@ The control plane owns:
 - MCP access tokens
 - UI/admin/client route surfaces
 
+Browser login and one-time onboarding token exchange mint account-scoped CLI
+access tokens by default. Workspace-scoped CLI mount tokens are a separate
+narrow surface for mounting one workspace without granting account-level
+workspace management.
+
 Redis remains the data plane for workspace contents: manifests, blobs,
 checkpoints, live roots, activity, and file history.
 
@@ -58,6 +63,7 @@ Implemented auth paths:
 - CLI access tokens
 - MCP access tokens
 - browser-mediated CLI onboarding token exchange
+- workspace-scoped CLI mount tokens
 
 Open auth work:
 
@@ -90,6 +96,9 @@ Implemented:
 - managed `afs ws mount` starts sync from a control-plane-issued workspace
   session bundle
 - managed sync daemons heartbeat and disconnect through the control plane
+- workspace-scoped mount tokens can be saved with
+  `afs auth login --access-token` and are forced read-only when created with
+  `mount-ro`
 - workspace detail, agents, overview, activity, and history views carry enough
   database/workspace routing context to operate without a global database
   selector

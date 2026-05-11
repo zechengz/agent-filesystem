@@ -165,9 +165,12 @@ func NewHandlerWithOptions(manager *DatabaseManager, opts HandlerOptions) http.H
 				Name:              strings.TrimSpace(record.OwnerLabel),
 				Provider:          "cli-token",
 				TokenID:           strings.TrimSpace(record.ID),
+				Scope:             normalizeCLITokenScope(record.Scope),
+				Capability:        normalizeCLITokenCapability(record.Scope, record.Capability),
 				ScopedDatabaseID:  strings.TrimSpace(record.DatabaseID),
 				ScopedWorkspaceID: strings.TrimSpace(record.WorkspaceID),
 				ScopedWorkspace:   strings.TrimSpace(record.WorkspaceName),
+				Readonly:          cliCapabilityReadonly(record.Capability),
 			}, nil
 		})
 		opts.Auth.AttachMCPTokenAuthenticator(func(ctx context.Context, rawToken string) (*AuthIdentity, error) {
@@ -238,7 +241,7 @@ type spaFallbackHandler struct {
 
 func (h *spaFallbackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Route API requests to the admin mux. `/v1/` already covers /v1/version.
-	if strings.HasPrefix(r.URL.Path, "/v1/") || r.URL.Path == "/healthz" || r.URL.Path == "/install.sh" {
+	if strings.HasPrefix(r.URL.Path, "/v1/") || strings.HasPrefix(r.URL.Path, "/v2/") || r.URL.Path == "/healthz" || r.URL.Path == "/install.sh" {
 		h.admin.ServeHTTP(w, r)
 		return
 	}
@@ -753,6 +756,116 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 		handleResolvedWorkspaceRoute(w, r, manager, workspacePath)
 	})
 
+	mux.HandleFunc("/v2/volumes", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.ListAllWorkspaceSummaries(r.Context())
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodPost:
+			var input CreateWorkspaceRequest
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.CreateResolvedWorkspace(r.Context(), input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, response)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
+	})
+
+	mux.HandleFunc("/v2/volumes:import", func(w http.ResponseWriter, r *http.Request) {
+		r = attachChangelogSession(r)
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input ImportWorkspaceRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, fmt.Errorf("invalid request body: %w", err))
+			return
+		}
+		response, err := manager.ImportResolvedWorkspace(r.Context(), input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, response)
+	})
+
+	mux.HandleFunc("/v2/volumes:import-local", func(w http.ResponseWriter, r *http.Request) {
+		r = attachChangelogSession(r)
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input ImportLocalRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, fmt.Errorf("invalid request body: %w", err))
+			return
+		}
+		response, err := manager.ImportResolvedLocal(r.Context(), input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, response)
+	})
+
+	mux.HandleFunc("/v2/volumes/", func(w http.ResponseWriter, r *http.Request) {
+		volumePath := strings.TrimPrefix(r.URL.Path, "/v2/volumes/")
+		volumePath = strings.Trim(volumePath, "/")
+		if volumePath == "" {
+			writeError(w, os.ErrNotExist)
+			return
+		}
+		handleResolvedWorkspaceRoute(w, r, manager, volumePath)
+	})
+
+	mux.HandleFunc("/v2/workspaces", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.ListAllWorkspaceCompositions(r.Context())
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodPost:
+			var input createWorkspaceCompositionRequest
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.CreateResolvedWorkspaceComposition(r.Context(), input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, response)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
+	})
+
+	mux.HandleFunc("/v2/workspaces/", func(w http.ResponseWriter, r *http.Request) {
+		workspacePath := strings.TrimPrefix(r.URL.Path, "/v2/workspaces/")
+		workspacePath = strings.Trim(workspacePath, "/")
+		if workspacePath == "" {
+			writeError(w, os.ErrNotExist)
+			return
+		}
+		handleResolvedWorkspaceCompositionRoute(w, r, manager, workspacePath)
+	})
+
 	mux.HandleFunc("/v1/databases/", func(w http.ResponseWriter, r *http.Request) {
 		trimmed := strings.TrimPrefix(r.URL.Path, "/v1/databases/")
 		trimmed = strings.Trim(trimmed, "/")
@@ -1143,6 +1256,142 @@ func attachChangelogSession(r *http.Request) *http.Request {
 		return r
 	}
 	return r.WithContext(WithChangeSessionContext(r.Context(), ChangeSessionContext{SessionID: sessionID}))
+}
+
+func handleResolvedWorkspaceCompositionRoute(
+	w http.ResponseWriter,
+	r *http.Request,
+	manager *DatabaseManager,
+	workspacePath string,
+) {
+	switch {
+	case strings.Contains(workspacePath, "/mounts/"):
+		parts := strings.Split(strings.Trim(workspacePath, "/"), "/")
+		if len(parts) != 3 || parts[1] != "mounts" {
+			writeError(w, os.ErrNotExist)
+			return
+		}
+		if r.Method != http.MethodDelete {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.RemoveResolvedWorkspaceCompositionMount(r.Context(), parts[0], parts[2])
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/mounts"):
+		workspace := strings.TrimSuffix(workspacePath, "/mounts")
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.GetResolvedWorkspaceComposition(r.Context(), workspace)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"items": response.Mounts})
+		case http.MethodPut:
+			var input replaceWorkspaceCompositionMountsRequest
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.ReplaceResolvedWorkspaceCompositionMounts(r.Context(), workspace, input.Mounts)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodPost:
+			var input workspaceCompositionMount
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.AddResolvedWorkspaceCompositionMount(r.Context(), workspace, input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, response)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
+	case strings.Contains(workspacePath, "/bookmarks/") && strings.HasSuffix(workspacePath, ":restore"):
+		parts := strings.Split(strings.Trim(workspacePath, "/"), "/")
+		if len(parts) != 3 || parts[1] != "bookmarks" {
+			writeError(w, os.ErrNotExist)
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		name := strings.TrimSuffix(parts[2], ":restore")
+		response, err := manager.RestoreResolvedWorkspaceBookmark(r.Context(), parts[0], name)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/bookmarks"):
+		workspace := strings.TrimSuffix(workspacePath, "/bookmarks")
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.ListResolvedWorkspaceBookmarks(r.Context(), workspace)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodPost:
+			var input createWorkspaceBookmarkRequest
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.CreateResolvedWorkspaceBookmark(r.Context(), workspace, input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, response)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
+	default:
+		workspace := workspacePath
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.GetResolvedWorkspaceComposition(r.Context(), workspace)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodPut:
+			var input updateWorkspaceCompositionRequest
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.UpdateResolvedWorkspaceComposition(r.Context(), workspace, input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodDelete:
+			if err := manager.DeleteResolvedWorkspaceComposition(r.Context(), workspace); err != nil {
+				writeError(w, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
+	}
 }
 
 func handleWorkspaceRoute(
@@ -1634,6 +1883,25 @@ func handleWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/cli-tokens"):
+		workspace := strings.TrimSuffix(workspacePath, "/cli-tokens")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input createCLIAccessTokenRequest
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+		}
+		response, err := manager.CreateWorkspaceCLIAccessToken(r.Context(), databaseID, workspace, input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, response)
 	case strings.HasSuffix(workspacePath, "/mcp-tokens"):
 		workspace := strings.TrimSuffix(workspacePath, "/mcp-tokens")
 		switch r.Method {
@@ -2204,6 +2472,25 @@ func handleResolvedWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/cli-tokens"):
+		workspace := strings.TrimSuffix(workspacePath, "/cli-tokens")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input createCLIAccessTokenRequest
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+		}
+		response, err := manager.CreateResolvedWorkspaceCLIAccessToken(r.Context(), workspace, input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, response)
 	case strings.HasSuffix(workspacePath, "/mcp-tokens"):
 		workspace := strings.TrimSuffix(workspacePath, "/mcp-tokens")
 		switch r.Method {

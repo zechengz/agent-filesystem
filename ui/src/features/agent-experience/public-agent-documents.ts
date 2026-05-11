@@ -366,51 +366,51 @@ type AppRouteDocument = {
   commands?: ReadonlyArray<string>;
 };
 
-const workspaceStudioTabDocs: Record<string, Omit<AppRouteDocument, "title" | "contextLines" | "resources"> & { titleSuffix: string }> = {
+const volumeStudioTabDocs: Record<string, Omit<AppRouteDocument, "title" | "contextLines" | "resources"> & { titleSuffix: string }> = {
   browse: {
     titleSuffix: "Browse Files",
-    summary: "Live file-tree view for the workspace head, optimized for inspecting directories, files, and working-copy state.",
+    summary: "Live file-tree view for the volume head, optimized for inspecting directories, files, and working-copy state.",
     bullets: [
-      "Use this tab to understand the current workspace tree and inspect files before making changes.",
+      "Use this tab to understand the current volume tree and inspect files before making changes.",
       "It is the closest browser equivalent to looking at a mounted directory in your shell or editor.",
-      "The format toggle changes how the tree is rendered, but the underlying workspace state is the same.",
+      "The format toggle changes how the tree is rendered, but the underlying volume state is the same.",
     ],
     agentTasks: [
-      "Confirm that the workspace contains the files the human expects before taking action.",
-      "Mount the workspace locally if you need full shell or editor workflows against the same tree.",
-      "Use this as the starting point before moving into checkpoints, changelog review, or settings.",
+      "Confirm that the volume contains the files the human expects before taking action.",
+      "Open the volume locally if you need full shell or editor workflows against the same tree.",
+      "Use this as the starting point before moving into checkpoints, history review, or settings.",
     ],
     commands: [
-      "afs ws mount {{WORKSPACE}} ~/afs/{{WORKSPACE}}",
-      "cd ~/afs/{{WORKSPACE}}",
-      "find . -maxdepth 2 | head -40",
+      "afs vol show {{VOLUME}}",
+      "afs fs --volume {{VOLUME}} ls /",
+      "afs fs --volume {{VOLUME}} cat README.md",
     ],
   },
   changes: {
-    titleSuffix: "Changelog",
-    summary: "Workspace-scoped change history for the current working copy, useful before checkpointing or reviewing recent edits.",
+    titleSuffix: "History",
+    summary: "Volume-scoped file and lifecycle history, useful before checkpointing or reviewing recent edits.",
     bullets: [
-      "Use this tab to see what changed in the workspace without leaving the browser.",
-      "It focuses on working-copy mutations rather than long-range operational history.",
+      "Use this tab to see what changed in the volume without leaving the browser.",
+      "It keeps file changes, checkpoint events, and volume lifecycle events together in one timeline.",
       "Open this before creating a checkpoint when you want to sanity-check the current delta.",
     ],
     agentTasks: [
       "Review the current delta before checkpointing or handing work to another agent.",
-      "Correlate suspicious file changes with the broader activity stream if the source is unclear.",
-      "Treat this as the browser-side readout of live workspace mutations, not as version control.",
+      "Use the Sessions filter when connection churn matters; keep the default timeline focused on meaningful volume history.",
+      "Treat this as the browser-side readout of live volume mutations, not as version control.",
     ],
     cautions: [
-      "Changelog entries describe live workspace edits; they are not Git commits and do not replace explicit checkpoints.",
+      "History entries describe live volume edits and lifecycle events; they are not Git commits and do not replace explicit checkpoints.",
     ],
     commands: [
-      "afs ws mount {{WORKSPACE}} ~/afs/{{WORKSPACE}}",
-      "afs cp create {{WORKSPACE}} before-review",
-      "afs cp list {{WORKSPACE}}",
+      "afs log {{VOLUME}} --json",
+      "afs cp create --volume {{VOLUME}} before-review",
+      "afs cp list --volume {{VOLUME}}",
     ],
   },
   checkpoints: {
     titleSuffix: "Checkpoints",
-    summary: "Explicit savepoint management for the workspace, including restore-ready checkpoints around risky edits.",
+    summary: "Explicit savepoint management for the volume, including restore-ready checkpoints around risky edits.",
     bullets: [
       "Use this tab to inspect prior checkpoints and create or restore safe rollback points.",
       "Checkpoints are explicit and durable; they are not created automatically when files change.",
@@ -418,43 +418,43 @@ const workspaceStudioTabDocs: Record<string, Omit<AppRouteDocument, "title" | "c
     ],
     agentTasks: [
       "Create a checkpoint before risky edits or before delegating work to another agent.",
-      "Use checkpoint history to understand safe restore targets when the workspace drifts.",
-      "Pair this tab with Changelog when deciding whether the current working copy should be preserved.",
+      "Use checkpoint history to understand safe restore targets when the volume drifts.",
+      "Pair this tab with History when deciding whether the current working copy should be preserved.",
     ],
     commands: [
-      "afs cp list {{WORKSPACE}}",
-      "afs cp create {{WORKSPACE}} before-risky-change",
+      "afs cp list --volume {{VOLUME}}",
+      "afs cp create --volume {{VOLUME}} before-risky-change",
     ],
   },
   activity: {
     titleSuffix: "History",
-    summary: "Workspace-specific event timeline for agent sessions, file actions, and checkpoint-related activity.",
+    summary: "Volume-scoped file and lifecycle history, useful before checkpointing or reviewing recent edits.",
     bullets: [
-      "Use this tab when you need the timeline of what happened to this workspace, not just the current file tree.",
-      "It complements the global History page by narrowing the view to one workspace.",
-      "This is the best place to answer 'which agent touched this workspace, and when?'",
+      "Use this tab to see what changed in the volume without leaving the browser.",
+      "It keeps file changes, checkpoint events, and volume lifecycle events together in one timeline.",
+      "Use the Sessions filter when connection history is relevant.",
     ],
     agentTasks: [
-      "Use the workspace timeline to correlate edits, session starts, and checkpoint events.",
-      "Escalate to the global History page when you need to compare this workspace against cross-workspace activity.",
-      "Jump back to Browse or Changelog once you know which files or moments need deeper inspection.",
+      "Review the current delta before checkpointing or handing work to another agent.",
+      "Escalate to the global History page when you need to compare this volume against broader activity.",
+      "Jump back to Browse once you know which files or moments need deeper inspection.",
     ],
   },
   settings: {
     titleSuffix: "Settings",
-    summary: "Workspace metadata and destructive management actions, including rename, description edits, MCP access, and deletion.",
+    summary: "Volume metadata and destructive management actions, including rename, description edits, MCP access, and deletion.",
     bullets: [
-      "Use this tab to manage workspace metadata rather than inspect files.",
-      "This is where workspace-level MCP access and destructive actions are surfaced.",
-      "The browser can jump from here into the MCP console with the workspace already scoped.",
+      "Use this tab to manage volume metadata rather than inspect files.",
+      "This is where volume-level MCP access and destructive actions are surfaced.",
+      "The browser can jump from here into the MCP console with the volume already scoped.",
     ],
     agentTasks: [
-      "Verify that you are operating on the intended workspace before changing metadata or deleting anything.",
-      "Use workspace-scoped MCP access when the agent should stay confined to one workspace.",
+      "Verify that you are operating on the intended volume before changing metadata or deleting anything.",
+      "Use volume-scoped MCP access when the agent should stay confined to one volume.",
       "Treat this tab as administrative state, not content authoring state.",
     ],
     cautions: [
-      "Deleting a workspace is irreversible from this surface.",
+      "Deleting a volume is irreversible from this surface.",
     ],
   },
 };
@@ -553,28 +553,85 @@ const appRouteDocuments: ReadonlyArray<{
     }),
   },
   {
-    match: (pathname) => pathname === "/workspaces",
+    match: (pathname) => pathname === "/volumes",
     build: () => ({
-      title: "Workspaces",
-      summary: "Workspace catalog and creation flow for the file trees your agents can access.",
+      title: "Volumes",
+      summary: "Volume catalog for filesystem-shaped content trees, checkpoints, search, and activity.",
       bullets: [
-        "Use this page to browse, create, and open workspaces.",
-        "This is the management view before drilling into one workspace.",
-        "Each workspace is a live filesystem-shaped tree with checkpoints and activity.",
+        "Use this page to browse, create, and open volumes.",
+        "This is the management view before drilling into one volume's files, checkpoints, history, or settings.",
+        "Agent Workspaces compose one or more volumes when an agent needs a working context.",
       ],
       agentTasks: [
-        "Use this page to find the correct workspace before taking any file or checkpoint action.",
-        "Create a new workspace here when a task should not reuse an existing working tree.",
-        "Move into workspace studio once you know which workspace should be inspected or modified.",
+        "Use this page to find the correct volume before taking any file or checkpoint action.",
+        "Create a new volume here when a task should not reuse an existing content tree.",
+        "Move into volume details once you know which volume should be inspected or modified.",
       ],
       resources: [
         { label: "Monitor", href: "/" },
+        { label: "Agent Workspaces", href: "/workspaces" },
+        { label: "Guide", href: `${docsBaseHref}/guides/agent-filesystem.md` },
+      ],
+      commands: [
+        "afs vol create my-project",
+        "afs vol show my-project",
+      ],
+    }),
+  },
+  {
+    match: (pathname) => pathname.startsWith("/volumes/"),
+    build: ({ pathname, searchParams }) => {
+      const volumeId = decodeURIComponent(pathname.split("/")[2] ?? "volume");
+      const requestedTab = searchParams.get("tab") ?? "browse";
+      const activeTab = requestedTab === "activity" ? "changes" : requestedTab;
+      const activeDoc = volumeStudioTabDocs[activeTab] ?? volumeStudioTabDocs.browse;
+      const databaseId = searchParams.get("databaseId");
+      const showWelcome = searchParams.get("welcome") === "true";
+      return {
+        title: `Volume Details: ${activeDoc.titleSuffix}`,
+        summary: `Detailed volume view for \`${volumeId}\`. ${activeDoc.summary}`,
+        bullets: activeDoc.bullets,
+        agentTasks: activeDoc.agentTasks,
+        cautions: activeDoc.cautions,
+        contextLines: [
+          `Volume id: \`${volumeId}\``,
+          `Active tab: ${activeDoc.titleSuffix}`,
+          ...(databaseId ? [`Database scope: \`${databaseId}\``] : []),
+          ...(showWelcome ? ["Welcome interstitial is active for a newly created volume."] : []),
+        ],
+        resources: [
+          { label: "All Volumes", href: "/volumes" },
+          { label: "History", href: "/activity" },
+          { label: "Guide", href: `${docsBaseHref}/guides/agent-filesystem.md` },
+        ],
+        commands: substituteVolumeCommands(activeDoc.commands, volumeId),
+      };
+    },
+  },
+  {
+    match: (pathname) => pathname === "/workspaces",
+    build: () => ({
+      title: "Agent Workspaces",
+      summary: "Agent Workspace catalog and creation flow for composing volumes into agent-ready working contexts.",
+      bullets: [
+        "Use this page to browse, create, and open Agent Workspaces.",
+        "This is the management view before drilling into one agent workspace.",
+        "Each Agent Workspace can attach volumes and expose scoped access for agents.",
+      ],
+      agentTasks: [
+        "Use this page to find the correct Agent Workspace before connecting or configuring an agent.",
+        "Create a new Agent Workspace here when an agent needs its own composed working context.",
+        "Move into Volumes when the task is about file content, search, checkpoints, or history.",
+      ],
+      resources: [
+        { label: "Monitor", href: "/" },
+        { label: "Volumes", href: "/volumes" },
         { label: "Templates", href: "/templates" },
         { label: "Guide", href: `${docsBaseHref}/guides/agent-filesystem.md` },
       ],
       commands: [
-        "afs ws create my-project",
-        "afs ws mount my-project ~/my-project",
+        "afs ws list",
+        "afs vol list",
       ],
     }),
   },
@@ -582,28 +639,36 @@ const appRouteDocuments: ReadonlyArray<{
     match: (pathname) => pathname.startsWith("/workspaces/"),
     build: ({ pathname, searchParams }) => {
       const workspaceId = decodeURIComponent(pathname.split("/")[2] ?? "workspace");
-      const activeTab = searchParams.get("tab") ?? "browse";
-      const activeDoc = workspaceStudioTabDocs[activeTab] ?? workspaceStudioTabDocs.browse;
+      const activeTab = searchParams.get("tab") ?? "filesystem";
       const databaseId = searchParams.get("databaseId");
-      const showWelcome = searchParams.get("welcome") === "true";
       return {
-        title: `Workspace Studio: ${activeDoc.titleSuffix}`,
-        summary: `Detailed workspace view for \`${workspaceId}\`. ${activeDoc.summary}`,
-        bullets: activeDoc.bullets,
-        agentTasks: activeDoc.agentTasks,
-        cautions: activeDoc.cautions,
+        title: `Agent Workspace: ${displayWorkspaceName(workspaceId)}`,
+        summary: `Agent Workspace details for \`${workspaceId}\`, including mounted volumes, tokens, and settings.`,
+        bullets: [
+          "Use this page to review and edit the resources an agent can access.",
+          "The filesystem tab shows mounted volumes that make up the agent workspace.",
+          "Settings and token surfaces are administrative controls, not direct file editing views.",
+        ],
+        agentTasks: [
+          "Verify the mounted volumes before connecting an agent to this workspace.",
+          "Use Volumes when you need to inspect files, checkpoints, search, or history.",
+          "Use MCP when you need a scoped token for this agent workspace.",
+        ],
         contextLines: [
-          `Workspace id: \`${workspaceId}\``,
-          `Active tab: ${activeDoc.titleSuffix}`,
+          `Agent Workspace id: \`${workspaceId}\``,
+          `Active tab: ${activeTab}`,
           ...(databaseId ? [`Database scope: \`${databaseId}\``] : []),
-          ...(showWelcome ? ["Welcome interstitial is active for a newly created workspace."] : []),
         ],
         resources: [
-          { label: "All Workspaces", href: "/workspaces" },
-          { label: "History", href: "/activity" },
+          { label: "All Agent Workspaces", href: "/workspaces" },
+          { label: "Volumes", href: "/volumes" },
+          { label: "MCP", href: `/mcp${databaseId ? `?databaseId=${encodeURIComponent(databaseId)}&workspaceId=${encodeURIComponent(workspaceId)}` : `?workspaceId=${encodeURIComponent(workspaceId)}`}` },
           { label: "Guide", href: `${docsBaseHref}/guides/agent-filesystem.md` },
         ],
-        commands: substituteWorkspaceCommands(activeDoc.commands, workspaceId),
+        commands: [
+          "afs ws list",
+          "afs vol list",
+        ],
       };
     },
   },
@@ -984,11 +1049,11 @@ ${relatedLinks}
   };
 }
 
-function substituteWorkspaceCommands(commands: ReadonlyArray<string> | undefined, workspaceId: string) {
+function substituteVolumeCommands(commands: ReadonlyArray<string> | undefined, volumeId: string) {
   if (commands == null) {
     return undefined;
   }
-  return commands.map((command) => command.replaceAll("{{WORKSPACE}}", workspaceId));
+  return commands.map((command) => command.replaceAll("{{VOLUME}}", volumeId));
 }
 
 function buildCommonHeader(title: string, pathname: string, siteOrigin: string) {

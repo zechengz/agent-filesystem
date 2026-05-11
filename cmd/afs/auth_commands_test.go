@@ -26,7 +26,7 @@ func TestResolveLoginModePromptsForFreshLogin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			withStdin(t, tc.input)
 			out, err := captureStdout(t, func() error {
-				got, err := resolveLoginMode(tc.cfg, false, false, "", "")
+				got, err := resolveLoginMode(tc.cfg, false, false, "", "", "")
 				if err != nil {
 					return err
 				}
@@ -77,7 +77,7 @@ func TestResolveLoginModeInfersCloudFromKnownURL(t *testing.T) {
 		"https://agentfilesystem.vercel.app",
 	} {
 		t.Run(rawURL, func(t *testing.T) {
-			got, err := resolveLoginMode(defaultConfig(), false, false, rawURL, "")
+			got, err := resolveLoginMode(defaultConfig(), false, false, rawURL, "", "")
 			if err != nil {
 				t.Fatalf("resolveLoginMode() returned error: %v", err)
 			}
@@ -95,7 +95,7 @@ func TestResolveLoginModeInfersSelfHostedFromUnknownURL(t *testing.T) {
 		"https://control-plane.internal.example",
 	} {
 		t.Run(rawURL, func(t *testing.T) {
-			got, err := resolveLoginMode(defaultConfig(), false, false, rawURL, "")
+			got, err := resolveLoginMode(defaultConfig(), false, false, rawURL, "", "")
 			if err != nil {
 				t.Fatalf("resolveLoginMode() returned error: %v", err)
 			}

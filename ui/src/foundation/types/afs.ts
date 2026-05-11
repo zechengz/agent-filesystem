@@ -636,6 +636,96 @@ export type AFSWorkspaceListResponse = {
 
 export type AFSWorkspaceDetail = AFSWorkspace;
 
+export type AFSWorkspaceCompositionMount = {
+  volumeId: string;
+  volumeName?: string;
+  mountPath: string;
+  readonly: boolean;
+  volumeTokenId?: string;
+};
+
+export type AFSWorkspaceCompositionVolumeLabel = {
+  id: string;
+  name?: string;
+  mountPath: string;
+  readonly: boolean;
+};
+
+export type AFSWorkspaceBookmarkVolume = {
+  volumeId: string;
+  volumeName?: string;
+  checkpointId: string;
+};
+
+export type AFSWorkspaceBookmark = {
+  workspaceId: string;
+  name: string;
+  description?: string;
+  volumes: AFSWorkspaceBookmarkVolume[];
+  createdAt: string;
+};
+
+export type AFSWorkspaceCompositionSummary = {
+  id: string;
+  name: string;
+  description?: string;
+  databaseId?: string;
+  databaseName?: string;
+  cloudAccount?: string;
+  ownerSubject?: string;
+  ownerLabel?: string;
+  mountCount: number;
+  mountedVolumes: AFSWorkspaceCompositionVolumeLabel[];
+  connectedAgentCount: number;
+  lastActivityAt?: string;
+  updatedAt: string;
+};
+
+export type AFSWorkspaceCompositionDetail = {
+  id: string;
+  name: string;
+  description?: string;
+  databaseId?: string;
+  databaseName?: string;
+  cloudAccount?: string;
+  ownerSubject?: string;
+  ownerLabel?: string;
+  mounts: AFSWorkspaceCompositionMount[];
+  bookmarks: AFSWorkspaceBookmark[];
+  connectedAgentCount: number;
+  createdAt: string;
+  updatedAt: string;
+  lastActivityAt?: string;
+};
+
+export type CreateWorkspaceCompositionInput = {
+  name: string;
+  description?: string;
+  databaseId?: string;
+  mounts?: AFSWorkspaceCompositionMount[];
+};
+
+export type UpdateWorkspaceCompositionInput = {
+  workspaceId: string;
+  name?: string;
+  description?: string;
+};
+
+export type ReplaceWorkspaceCompositionMountsInput = {
+  workspaceId: string;
+  mounts: AFSWorkspaceCompositionMount[];
+};
+
+export type AddWorkspaceCompositionMountInput = {
+  workspaceId: string;
+  mount: AFSWorkspaceCompositionMount;
+};
+
+export type RemoveWorkspaceCompositionMountInput = {
+  workspaceId: string;
+  volumeId: string;
+};
+
 export type AFSRedisStats = {
   redisVersion?: string;
   usedMemoryBytes: number;
@@ -875,11 +965,13 @@ export type AFSMCPProfile =
   | "admin-ro"
   | "admin-rw";
 
+export type AFSMCPCapability = "ro" | "rw" | "rw-checkpoint" | "admin";
+
 /**
  * Scope of an access token. `control-plane` = user-scoped, no workspace
- * binding; agents use it for workspace management + on-demand issuance of
- * workspace tokens. `workspace:<workspaceId>` = bound to a single workspace;
- * agents use it for file operations + checkpoints.
+ * binding; agents use it for management + on-demand issuance of scoped
+ * tokens. `volume:<volumeId>` = bound to a content tree; legacy
+ * `workspace:<workspaceId>` scopes may still be shown for old tokens.
  */
 export type AFSMCPScope = string;
 
@@ -899,6 +991,7 @@ export type AFSMCPToken = {
   workspaceId: string;
   workspaceName?: string;
   profile: AFSMCPProfile;
+  capability?: AFSMCPCapability | string;
   readonly: boolean;
   token?: string;
   createdAt: string;
@@ -913,12 +1006,37 @@ export type CreateMCPTokenInput = {
   workspaceId: string;
   name?: string;
   profile: AFSMCPProfile;
+  scope?: AFSMCPScope;
+  capability?: AFSMCPCapability | string;
   expiresAt?: string;
   templateSlug?: string;
 };
 
 export type CreateControlPlaneTokenInput = {
   name?: string;
+  expiresAt?: string;
+};
+
+export type AFSCLIAccessTokenCapability = "mount-ro" | "mount-rw";
+
+export type AFSCLIAccessToken = {
+  id: string;
+  name?: string;
+  databaseId?: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  scope: string;
+  capability?: AFSCLIAccessTokenCapability | string;
+  token?: string;
+  createdAt: string;
+  expiresAt?: string;
+};
+
+export type CreateCLIAccessTokenInput = {
+  databaseId?: string;
+  workspaceId: string;
+  name?: string;
+  capability: AFSCLIAccessTokenCapability;
   expiresAt?: string;
 };
 

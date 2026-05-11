@@ -25,34 +25,35 @@ func TestConfigPathDefaultsToAFSConfig(t *testing.T) {
 	}
 }
 
-func TestWorkspaceRootShortcutsAreDocumentedAliases(t *testing.T) {
+func TestVolumeRootShortcutsAreDocumentedAliases(t *testing.T) {
 	t.Helper()
 
 	for _, command := range []string{
-		"mount", "unmount", "create", "list", "clone", "default",
+		"create", "list", "clone", "default",
 		"set-default", "unset-default", "info", "import", "fork",
 		"delete",
 	} {
-		if !isWorkspaceRootShortcut(command) {
-			t.Fatalf("isWorkspaceRootShortcut(%q) = false, want true", command)
+		if !isVolumeRootShortcut(command) {
+			t.Fatalf("isVolumeRootShortcut(%q) = false, want true", command)
 		}
 	}
-	for _, command := range []string{"status", "fs", "cp", "log", "config", "reset", "versioning"} {
-		if isWorkspaceRootShortcut(command) {
-			t.Fatalf("isWorkspaceRootShortcut(%q) = true, want false", command)
+	for _, command := range []string{"mount", "unmount", "status", "fs", "cp", "log", "config", "reset", "versioning"} {
+		if isVolumeRootShortcut(command) {
+			t.Fatalf("isVolumeRootShortcut(%q) = true, want false", command)
 		}
 	}
 
-	got := workspaceRootShortcutArgs([]string{"mount", "demo", "~/demo"})
-	want := []string{"ws", "mount", "demo", "~/demo"}
+	got := volumeRootShortcutArgs([]string{"create", "demo"})
+	want := []string{"vol", "create", "demo"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("workspaceRootShortcutArgs() = %q, want %q", got, want)
+		t.Fatalf("volumeRootShortcutArgs() = %q, want %q", got, want)
 	}
 
 	out := captureStderrText(t, printUsage)
 	plain := stripAnsi(out)
 	for _, documented := range []string{
-		"Workspace Shortcuts", "mount", "unmount", "create", "list", "clone",
+		"Agent Workspace Shortcuts", "mount", "unmount", "Volume Shortcuts",
+		"create", "list", "clone",
 		"default", "set-default", "unset-default", "info", "import", "fork",
 		"delete",
 	} {
@@ -63,6 +64,12 @@ func TestWorkspaceRootShortcutsAreDocumentedAliases(t *testing.T) {
 	if strings.Contains(out, "  reset") {
 		t.Fatalf("top-level help should not document non-workspace shortcut %q:\n%s", "reset", out)
 	}
+	if strings.Contains(plain, `Omit "vol" for: mount, unmount`) {
+		t.Fatalf("top-level help should not document mount/unmount as volume shortcuts:\n%s", plain)
+	}
+	if !strings.Contains(plain, "map to Agent Workspace manifests") {
+		t.Fatalf("top-level help should explain root mount/unmount workspace mapping:\n%s", plain)
+	}
 	if !strings.Contains(plain, "Filesystem Shortcuts") {
 		t.Fatalf("top-level help should document filesystem shortcuts:\n%s", plain)
 	}
@@ -71,6 +78,9 @@ func TestWorkspaceRootShortcutsAreDocumentedAliases(t *testing.T) {
 	}
 	if !strings.Contains(plain, `shortcuts use the "default" workspace`) || !strings.Contains(plain, `fs <workspace> <command> to choose one.`) {
 		t.Fatalf("top-level help should explain filesystem shortcut workspace resolution:\n%s", plain)
+	}
+	if strings.Contains(plain, "Common Flows") {
+		t.Fatalf("top-level help should not include Common Flows:\n%s", plain)
 	}
 	for _, row := range []string{
 		"grep               exact workspace content search",

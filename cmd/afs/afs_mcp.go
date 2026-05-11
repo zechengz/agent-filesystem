@@ -92,14 +92,27 @@ func cmdMCP(args []string) error {
 	workspaceFlag := ""
 	profileFlag := ""
 	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "--workspace":
+		switch {
+		case args[i] == "--workspace" || args[i] == "--volume":
 			if i+1 >= len(args) {
-				return fmt.Errorf("missing value for --workspace\n\n%s", mcpUsageText(bin))
+				return fmt.Errorf("missing value for %s\n\n%s", args[i], mcpUsageText(bin))
+			}
+			if workspaceFlag != "" {
+				return fmt.Errorf("only one of --volume or --workspace may be provided\n\n%s", mcpUsageText(bin))
 			}
 			workspaceFlag = strings.TrimSpace(args[i+1])
 			i++
-		case "--profile":
+		case strings.HasPrefix(args[i], "--volume="):
+			if workspaceFlag != "" {
+				return fmt.Errorf("only one of --volume or --workspace may be provided\n\n%s", mcpUsageText(bin))
+			}
+			workspaceFlag = strings.TrimSpace(strings.TrimPrefix(args[i], "--volume="))
+		case strings.HasPrefix(args[i], "--workspace="):
+			if workspaceFlag != "" {
+				return fmt.Errorf("only one of --volume or --workspace may be provided\n\n%s", mcpUsageText(bin))
+			}
+			workspaceFlag = strings.TrimSpace(strings.TrimPrefix(args[i], "--workspace="))
+		case args[i] == "--profile":
 			if i+1 >= len(args) {
 				return fmt.Errorf("missing value for --profile\n\n%s", mcpUsageText(bin))
 			}
@@ -139,7 +152,7 @@ func cmdMCP(args []string) error {
 
 func mcpUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s mcp [--workspace <name>] [--profile <profile>]
+  %s mcp [--volume <name>] [--profile <profile>]
 
 Start the Agent Filesystem MCP server over stdio.
 
@@ -154,9 +167,9 @@ This command is meant to be launched by an MCP client, for example:
 
   {
     "mcpServers": {
-      "afs": {
+        "afs": {
         "command": "/absolute/path/to/%s",
-        "args": ["mcp", "--workspace", "my-workspace", "--profile", "workspace-rw"]
+        "args": ["mcp", "--volume", "my-volume", "--profile", "workspace-rw"]
       }
     }
   }

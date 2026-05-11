@@ -93,6 +93,7 @@ func prepareSyncBootstrapForWorkspace(ctx context.Context, cfg config, requested
 	runtimeCfg.CurrentWorkspace = selection.Name
 	runtimeCfg.CurrentWorkspaceID = selection.ID
 	runtimeCfg.DatabaseID = strings.TrimSpace(session.DatabaseID)
+	runtimeCfg.ReadOnly = runtimeCfg.ReadOnly || session.Readonly
 	runtimeCfg.RedisAddr = rewriteManagedRedisAddrForLocalhost(runtimeCfg.URL, session.Redis.RedisAddr)
 	runtimeCfg.RedisUsername = session.Redis.RedisUsername
 	runtimeCfg.RedisPassword = session.Redis.RedisPassword
@@ -117,7 +118,7 @@ func prepareSyncBootstrapForWorkspace(ctx context.Context, cfg config, requested
 // returns control to the shell.
 func startSyncServices(cfg config, foreground bool) error {
 	if strings.TrimSpace(cfg.LocalPath) == "" {
-		return errors.New("localPath is required when mode=sync; run `afs ws mount <workspace> <directory>`")
+		return errors.New("localPath is required when mode=sync; run `afs vol mount <volume> <directory>`")
 	}
 	localRoot, err := expandPath(cfg.LocalPath)
 	if err != nil {

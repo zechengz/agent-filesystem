@@ -85,6 +85,26 @@ type httpSaveCheckpointRequest struct {
 	AllowUnchanged        bool                  `json:"allow_unchanged,omitempty"`
 }
 
+type httpCreateCLIAccessTokenRequest struct {
+	Name       string `json:"name,omitempty"`
+	Capability string `json:"capability,omitempty"`
+	Readonly   bool   `json:"readonly,omitempty"`
+	ExpiresAt  string `json:"expires_at,omitempty"`
+}
+
+type httpCLIAccessTokenResponse struct {
+	ID            string `json:"id"`
+	Name          string `json:"name,omitempty"`
+	DatabaseID    string `json:"database_id,omitempty"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceName string `json:"workspace_name,omitempty"`
+	Scope         string `json:"scope"`
+	Capability    string `json:"capability,omitempty"`
+	Token         string `json:"token,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	ExpiresAt     string `json:"expires_at,omitempty"`
+}
+
 type httpSaveCheckpointResponse struct {
 	Saved bool `json:"saved"`
 }
@@ -114,7 +134,7 @@ func newHTTPControlPlaneClient(ctx context.Context, cfg config) (*httpControlPla
 			Timeout: 15 * time.Minute,
 		},
 	}
-	if productMode == productModeCloud {
+	if productMode != productModeLocal {
 		client.authToken = strings.TrimSpace(cfg.AuthToken)
 	}
 	return client, client.databaseID, nil
@@ -148,6 +168,49 @@ func newAnonymousHTTPControlPlaneClient(baseURL string) (*httpControlPlaneClient
 func (c *httpControlPlaneClient) ListWorkspaceSummaries(ctx context.Context) (controlplane.WorkspaceListResponse, error) {
 	var out controlplane.WorkspaceListResponse
 	err := c.doJSON(ctx, http.MethodGet, "/v1/workspaces", nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) CreateWorkspaceComposition(ctx context.Context, input controlplane.CreateWorkspaceCompositionRequest) (controlplane.WorkspaceCompositionDetail, error) {
+	var out controlplane.WorkspaceCompositionDetail
+	err := c.doJSON(ctx, http.MethodPost, "/v2/workspaces", input, &out, http.StatusCreated)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) ListWorkspaceCompositions(ctx context.Context) (controlplane.WorkspaceCompositionListResponse, error) {
+	var out controlplane.WorkspaceCompositionListResponse
+	err := c.doJSON(ctx, http.MethodGet, "/v2/workspaces", nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) GetWorkspaceComposition(ctx context.Context, workspace string) (controlplane.WorkspaceCompositionDetail, error) {
+	var out controlplane.WorkspaceCompositionDetail
+	err := c.doJSON(ctx, http.MethodGet, c.workspaceCompositionPath(workspace), nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) AddWorkspaceCompositionMount(ctx context.Context, workspace string, mount controlplane.WorkspaceCompositionMount) (controlplane.WorkspaceCompositionDetail, error) {
+	var out controlplane.WorkspaceCompositionDetail
+	err := c.doJSON(ctx, http.MethodPost, c.workspaceCompositionPath(workspace, "mounts"), mount, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) RemoveWorkspaceCompositionMount(ctx context.Context, workspace, volumeID string) (controlplane.WorkspaceCompositionDetail, error) {
+	var out controlplane.WorkspaceCompositionDetail
+	err := c.doJSON(ctx, http.MethodDelete, c.workspaceCompositionPath(workspace, "mounts", volumeID), nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) CreateWorkspaceBookmark(ctx context.Context, workspace string, input controlplane.CreateWorkspaceBookmarkRequest) (controlplane.WorkspaceBookmark, error) {
+	var out controlplane.WorkspaceBookmark
+	err := c.doJSON(ctx, http.MethodPost, c.workspaceCompositionPath(workspace, "bookmarks"), input, &out, http.StatusCreated)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) RestoreWorkspaceBookmark(ctx context.Context, workspace, name string) (controlplane.WorkspaceBookmark, error) {
+	var out controlplane.WorkspaceBookmark
+	rel := c.workspaceCompositionPath(workspace, "bookmarks") + "/" + url.PathEscape(name) + ":restore"
+	err := c.doJSON(ctx, http.MethodPost, rel, nil, &out, http.StatusOK)
 	return out, err
 }
 
@@ -278,6 +341,12 @@ func (c *httpControlPlaneClient) UpdateWorkspaceVersioningPolicy(ctx context.Con
 
 func (c *httpControlPlaneClient) DeleteWorkspace(ctx context.Context, workspace string) error {
 	return c.doJSON(ctx, http.MethodDelete, c.workspacePath(workspace), nil, nil, http.StatusNoContent)
+}
+
+func (c *httpControlPlaneClient) CreateWorkspaceCLIAccessToken(ctx context.Context, workspace string, input httpCreateCLIAccessTokenRequest) (httpCLIAccessTokenResponse, error) {
+	var out httpCLIAccessTokenResponse
+	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace, "cli-tokens"), input, &out, http.StatusCreated)
+	return out, err
 }
 
 func (c *httpControlPlaneClient) CreateWorkspaceSession(ctx context.Context, workspace string, input controlplane.CreateWorkspaceSessionRequest) (controlplane.WorkspaceSession, error) {
@@ -557,6 +626,10 @@ func (c *httpControlPlaneClient) clientScopedPathFor(databaseID string, parts ..
 
 func (c *httpControlPlaneClient) workspacePath(workspace string, more ...string) string {
 	return c.unscopedPath("/v1/workspaces", append([]string{workspace}, more...)...)
+}
+
+func (c *httpControlPlaneClient) workspaceCompositionPath(workspace string, more ...string) string {
+	return c.unscopedPath("/v2/workspaces", append([]string{workspace}, more...)...)
 }
 
 func (c *httpControlPlaneClient) clientWorkspacePath(workspace string, more ...string) string {

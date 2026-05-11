@@ -23,6 +23,10 @@ type mountRecord struct {
 	ID                   string    `json:"id"`
 	Workspace            string    `json:"workspace"`
 	WorkspaceID          string    `json:"workspace_id,omitempty"`
+	AgentWorkspace       string    `json:"agent_workspace,omitempty"`
+	AgentWorkspaceID     string    `json:"agent_workspace_id,omitempty"`
+	AgentWorkspaceRoot   string    `json:"agent_workspace_root,omitempty"`
+	AgentWorkspacePath   string    `json:"agent_workspace_path,omitempty"`
 	LocalPath            string    `json:"local_path"`
 	Mode                 string    `json:"mode"`
 	MountBackend         string    `json:"mount_backend,omitempty"`

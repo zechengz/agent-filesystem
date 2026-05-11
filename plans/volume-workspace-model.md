@@ -1,9 +1,9 @@
 # Volume + Workspace Data Model
 
-Status: draft
+Status: implementation pass landed
 Owner: rowan
 Created: 2026-05-08
-Updated: 2026-05-08
+Updated: 2026-05-09
 
 Pair plan: [`volume-workspace-surfaces.md`](volume-workspace-surfaces.md) (CLI + UI rollout).
 
@@ -233,30 +233,51 @@ Breaking change at API and Redis-key level. Mitigated via:
 - [ ] Rename `WorkspaceMeta` → `VolumeMeta` in `internal/controlplane/`
 - [ ] Rename `WorkspaceSessionRecord` → `VolumeSessionRecord` (sessions
       remain volume-bound; workspace sessions are aggregations)
-- [ ] Add `WorkspaceMeta` (new) carrying the manifest and bookmarks
-- [ ] Update Redis key constants; add new key shape for compositions
-- [ ] Update `internal/controlplane/store.go`, `service.go` accordingly
-- [ ] Backwards-compat read shim: `/v1/workspaces` reads from new volume
-      keys without exposing the new shape
+- [x] Add `WorkspaceMeta` (new) carrying the manifest and bookmarks
+- [x] Update Redis key constants; add new key shape for compositions
+- [x] Add composition store/service helpers under `internal/controlplane/`
+- [x] Backwards-compat read shim: `/v2/volumes` reads the current `/v1/workspaces`
+      content-tree data without exposing the composition shape
 
 ### Phase 2 — API endpoints (3–4 days)
 
-- [ ] `/v2/volumes/...` endpoints (mostly direct rename of `/v1/workspaces`)
-- [ ] `/v2/workspaces/...` endpoints (NEW)
-- [ ] Manifest CRUD: PUT/POST/DELETE on `/v2/workspaces/{id}/mounts`
-- [ ] Bookmarks: list, create, restore
-- [ ] Validation: mount-path uniqueness, path overlap rejection,
-      cross-owner volume_token_id enforcement
-- [ ] HTTP integration tests
+- [x] `/v2/volumes/...` endpoints (mostly direct rename of `/v1/workspaces`)
+- [x] `/v2/workspaces/...` endpoints (NEW)
+- [x] Manifest CRUD: PUT/POST/DELETE on `/v2/workspaces/{id}/mounts`
+- [x] Bookmarks: list, create, restore
+- [x] Validation: mount-path uniqueness and path overlap rejection
+- [ ] Cross-owner volume_token_id enforcement
+- [x] HTTP integration tests
 
 ### Phase 3 — Token model (2–3 days)
 
-- [ ] Add `Scope` and `Capability` fields on `mcpAccessTokenRecord`
-- [ ] Compute `Profile` (legacy field) from (scope, capability) for compat
-- [ ] Token issuance API accepts new fields; old `profile` accepted for compat
+- [x] Add `Scope` and `Capability` fields on `mcpAccessTokenRecord`
+- [x] Compute `Profile` (legacy field) from (scope, capability) for compat
+- [x] Token issuance API accepts new fields; old `profile` accepted for compat
 - [ ] Capability ladder enforcement in HTTP handlers and MCP tool gating
 - [ ] Manifest readonly enforcement (workspace token + volume mount readonly
       = effective ro)
+
+## Implementation Review — 2026-05-09
+
+Landed the non-destructive compatibility bridge:
+
+- `/v2/volumes` aliases the current workspace/content-tree implementation.
+- `/v2/workspaces` stores composition manifests separately from content-tree
+  metadata, with mount add/remove/replace and workspace bookmarks.
+- Mount validation rejects duplicate/overlapping paths across different
+  volumes.
+- MCP token records now persist `scope` and `capability`, while legacy
+  `profile` remains accepted and computed for compatibility.
+- Targeted verification passed with `go test ./cmd/afs ./internal/controlplane`.
+
+Still intentionally not complete in this pass:
+
+- Physical Redis key migration from `workspace:*` to `volume:*`.
+- Go type renames from `Workspace*` to `Volume*` across the old content-tree
+  implementation.
+- Cross-owner volume-token enforcement and full capability gating through
+  every MCP/HTTP operation.
 
 ### Phase 4 — Daemon multiplexing (4–5 days)
 

@@ -61,11 +61,13 @@ type AuthIdentity struct {
 	Groups   []string
 	Provider string
 	TokenID  string
-	// Scope carries the MCP-token scope on token-authenticated requests:
-	//   "workspace:<workspace-id>" for workspace-bound tokens,
-	//   "control-plane"            for user-scoped control-plane tokens,
-	//   ""                         for non-MCP auth paths.
+	// Scope carries the token scope on token-authenticated requests:
+	//   "account"                  for account/org-scoped CLI tokens,
+	//   "workspace:<workspace-id>" for workspace-bound CLI/MCP tokens,
+	//   "control-plane"            for user-scoped control-plane MCP tokens,
+	//   ""                         for non-token auth paths.
 	Scope             string
+	Capability        string
 	ScopedDatabaseID  string
 	ScopedWorkspaceID string
 	ScopedWorkspace   string
@@ -268,6 +270,10 @@ func (a *AuthHandler) Middleware(next http.Handler) http.Handler {
 		}
 		if identity == nil {
 			next.ServeHTTP(w, r)
+			return
+		}
+		if !cliTokenAllowsHTTPPath(*identity, r.Method, r.URL.Path) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": ErrForbidden.Error()})
 			return
 		}
 

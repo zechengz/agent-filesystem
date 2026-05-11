@@ -50,12 +50,11 @@ type Props = {
   workspace: AFSWorkspaceDetail;
   browserView: AFSWorkspaceView;
   onBrowserViewChange: (view: AFSWorkspaceView) => void;
-  onAskWorkspace?: (path: string) => void;
 };
 
 /* ─── Component ──────────────────────────────────────────────────────── */
 
-export function FilesTab({ workspace, browserView, onBrowserViewChange, onAskWorkspace }: Props) {
+export function FilesTab({ workspace, browserView, onBrowserViewChange }: Props) {
   const updateFile = useUpdateWorkspaceFileMutation();
 
   const [currentPath, setCurrentPath] = useState("/");
@@ -180,15 +179,6 @@ export function FilesTab({ workspace, browserView, onBrowserViewChange, onAskWor
             })}
           </Breadcrumb>
         </ToolbarLeft>
-        {onAskWorkspace ? (
-          <Button
-            size="medium"
-            variant="secondary-fill"
-            onClick={() => onAskWorkspace(currentPath)}
-          >
-            Ask workspace
-          </Button>
-        ) : null}
       </RepoToolbar>
 
       {/* ─── File table ─── */}
@@ -550,10 +540,12 @@ const FileTableHeader = styled.th<{ $name?: boolean; $size?: boolean; $time?: bo
 
 const FileRow = styled.tr<{ $active?: boolean }>`
   cursor: pointer;
-  background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-panel-strong)")};
+  background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "var(--afs-panel-strong)")};
+  color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-ink)")};
 
   &:hover {
-    background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-panel)")};
+    background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
+    color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
   }
 
   &:not(:last-child) > td {

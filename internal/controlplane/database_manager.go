@@ -644,6 +644,7 @@ func (m *DatabaseManager) ListWorkspaceSummaries(ctx context.Context, databaseID
 	if err != nil {
 		return workspaceListResponse{}, err
 	}
+	items = filterWorkspaceSummariesForCLIToken(ctx, items)
 	return workspaceListResponse{Items: items}, nil
 }
 
@@ -1277,6 +1278,10 @@ func (m *DatabaseManager) CreateWorkspaceSession(ctx context.Context, databaseID
 	if err != nil {
 		return workspaceSession{}, err
 	}
+	input, err = applyCLITokenSessionPolicy(ctx, route, input)
+	if err != nil {
+		return workspaceSession{}, err
+	}
 	session, err := service.CreateWorkspaceSession(ctx, route.WorkspaceID, input)
 	if err != nil {
 		return workspaceSession{}, err
@@ -1298,11 +1303,19 @@ func (m *DatabaseManager) UpsertWorkspaceSession(ctx context.Context, databaseID
 	if err != nil {
 		return workspaceSessionInfo{}, err
 	}
+	input, err = applyCLITokenSessionPolicy(ctx, route, input)
+	if err != nil {
+		return workspaceSessionInfo{}, err
+	}
 	return service.UpsertWorkspaceSession(ctx, route.WorkspaceID, sessionID, input)
 }
 
 func (m *DatabaseManager) CreateResolvedWorkspaceSession(ctx context.Context, workspace string, input createWorkspaceSessionRequest) (workspaceSession, error) {
 	service, profile, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return workspaceSession{}, err
+	}
+	input, err = applyCLITokenSessionPolicy(ctx, route, input)
 	if err != nil {
 		return workspaceSession{}, err
 	}
@@ -1687,6 +1700,12 @@ func (m *DatabaseManager) HeartbeatWorkspaceSession(ctx context.Context, databas
 	if err != nil {
 		return workspaceSessionInfo{}, err
 	}
+	if len(input) > 0 {
+		input[0], err = applyCLITokenSessionPolicy(ctx, route, input[0])
+		if err != nil {
+			return workspaceSessionInfo{}, err
+		}
+	}
 	return service.HeartbeatWorkspaceSession(ctx, route.WorkspaceID, sessionID, input...)
 }
 
@@ -1694,6 +1713,12 @@ func (m *DatabaseManager) HeartbeatResolvedWorkspaceSession(ctx context.Context,
 	service, _, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
 		return workspaceSessionInfo{}, err
+	}
+	if len(input) > 0 {
+		input[0], err = applyCLITokenSessionPolicy(ctx, route, input[0])
+		if err != nil {
+			return workspaceSessionInfo{}, err
+		}
 	}
 	return service.HeartbeatWorkspaceSession(ctx, route.WorkspaceID, sessionID, input...)
 }
@@ -2004,6 +2029,9 @@ func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, wor
 			if subject != "" && strings.TrimSpace(route.OwnerSubject) != "" && strings.TrimSpace(route.OwnerSubject) != subject {
 				continue
 			}
+			if requireCLITokenWorkspaceAccess(ctx, route.DatabaseID, route.WorkspaceID, route.Name) != nil {
+				continue
+			}
 			filteredRoutes = append(filteredRoutes, route)
 		}
 		switch len(filteredRoutes) {
@@ -2064,6 +2092,9 @@ func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, wor
 			DatabaseID:  profile.ID,
 			WorkspaceID: workspaceStorageID(meta),
 			Name:        meta.Name,
+		}
+		if requireCLITokenWorkspaceAccess(ctx, route.DatabaseID, route.WorkspaceID, route.Name) != nil {
+			continue
 		}
 		if matchService == nil {
 			matchService = service
@@ -2173,6 +2204,7 @@ func (m *DatabaseManager) listAllWorkspaceSummariesByFanout(ctx context.Context)
 		}
 		return items[i].UpdatedAt > items[j].UpdatedAt
 	})
+	items = filterWorkspaceSummariesForCLIToken(ctx, items)
 	return workspaceListResponse{Items: items}, nil
 }
 
@@ -2330,11 +2362,11 @@ func (m *DatabaseManager) liveWorkspaceSummariesLocked(ctx context.Context, data
 					filtered = append(filtered, item)
 				}
 			}
-			return filtered, profile, nil
+			return filterWorkspaceSummariesForCLIToken(ctx, filtered), profile, nil
 		}
-		return synced, profile, nil
+		return filterWorkspaceSummariesForCLIToken(ctx, synced), profile, nil
 	}
-	return response.Items, profile, nil
+	return filterWorkspaceSummariesForCLIToken(ctx, response.Items), profile, nil
 }
 
 func (m *DatabaseManager) reconcileSessionCatalog(ctx context.Context) error {
@@ -2453,6 +2485,9 @@ func (m *DatabaseManager) resolveScopedWorkspace(ctx context.Context, databaseID
 			if subject != "" && strings.TrimSpace(route.OwnerSubject) != "" && strings.TrimSpace(route.OwnerSubject) != subject {
 				continue
 			}
+			if requireCLITokenWorkspaceAccess(ctx, route.DatabaseID, route.WorkspaceID, route.Name) != nil {
+				continue
+			}
 			filteredRoutes = append(filteredRoutes, route)
 		}
 		switch len(filteredRoutes) {
@@ -2476,11 +2511,15 @@ func (m *DatabaseManager) resolveScopedWorkspace(ctx context.Context, databaseID
 	if err != nil {
 		return nil, databaseProfile{}, workspaceCatalogRoute{}, err
 	}
-	return service, profile, workspaceCatalogRoute{
+	route := workspaceCatalogRoute{
 		DatabaseID:  profile.ID,
 		WorkspaceID: workspaceStorageID(meta),
 		Name:        meta.Name,
-	}, nil
+	}
+	if err := requireCLITokenWorkspaceAccess(ctx, route.DatabaseID, route.WorkspaceID, route.Name); err != nil {
+		return nil, databaseProfile{}, workspaceCatalogRoute{}, err
+	}
+	return service, profile, route, nil
 }
 
 func (m *DatabaseManager) attachWorkspaceSummaryIdentity(ctx context.Context, summary *workspaceSummary, profile databaseProfile) error {

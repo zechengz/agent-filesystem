@@ -87,11 +87,11 @@ export function LocalMCPAccessDialog({
 
         <FormGrid onSubmit={(event) => event.preventDefault()}>
           <Field>
-            Workspace
+            Volume
             <Select
               options={
                 options.length === 0
-                  ? [{ value: "", label: "No workspaces available" }]
+                  ? [{ value: "", label: "No volumes available" }]
                   : options.map((option) => ({
                       value: option.key,
                       label: option.workspace.name,
@@ -127,7 +127,7 @@ export function LocalMCPAccessDialog({
                 </Hint>
               </>
             ) : (
-              <EmptyHint>Select a workspace to generate a snippet.</EmptyHint>
+              <EmptyHint>Select a volume to generate a snippet.</EmptyHint>
             )}
           </SnippetBlock>
 
@@ -155,7 +155,7 @@ function buildLocalAccessConfig(workspaceName: string, profile: AFSMCPProfile) {
       mcpServers: {
         [`afs-${workspaceName}`]: {
           command: "afs",
-          args: ["mcp", "--workspace", workspaceName, "--profile", profile],
+          args: ["mcp", "--volume", workspaceName, "--profile", profile],
         },
       },
     },

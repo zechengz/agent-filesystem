@@ -329,7 +329,7 @@ const TabItem = styled.button<{ $active?: boolean }>`
   position: relative;
   border: none;
   background: transparent;
-  color: ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "var(--afs-muted)")};
+  color: ${(p) => (p.$active ? "var(--afs-selection-text)" : "var(--afs-muted)")};
   font-size: 14px;
   font-weight: 700;
   padding: 12px 18px;
@@ -337,7 +337,8 @@ const TabItem = styled.button<{ $active?: boolean }>`
   transition: color 120ms ease;
 
   &:hover {
-    color: var(--afs-accent, #2563eb);
+    color: ${(p) => (p.$active ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
+    background: var(--afs-selection-hover-bg);
   }
 
   &::after {
@@ -347,7 +348,7 @@ const TabItem = styled.button<{ $active?: boolean }>`
     right: 0;
     bottom: -1px;
     height: 2px;
-    background: ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "transparent")};
+    background: ${(p) => (p.$active ? "var(--afs-selection-indicator)" : "transparent")};
   }
 `;
 

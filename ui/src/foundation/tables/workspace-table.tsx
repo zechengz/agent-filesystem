@@ -67,6 +67,9 @@ type Props = {
   onDeleteWorkspace?: (workspace: AFSWorkspaceSummary) => void;
   deletingWorkspaceKey?: string | null;
   fillAvailableHeight?: boolean;
+  resourceLabel?: string;
+  resourcePluralLabel?: string;
+  idLabel?: string;
 };
 
 function workspaceRowKey(workspace: AFSWorkspaceSummary) {
@@ -93,6 +96,9 @@ export function WorkspaceTable({
   onDeleteWorkspace,
   deletingWorkspaceKey,
   fillAvailableHeight = false,
+  resourceLabel = "workspace",
+  resourcePluralLabel = "workspaces",
+  idLabel = "workspace ID",
 }: Props) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<WorkspaceSortField>("updatedAt");
@@ -180,8 +186,8 @@ export function WorkspaceTable({
                   <IdText title={id}>{id}</IdText>
                   <CopyButton
                     type="button"
-                    aria-label={`Copy workspace ID ${id}`}
-                    title={copiedId === id ? "Copied" : "Copy workspace ID"}
+                    aria-label={`Copy ${idLabel} ${id}`}
+                    title={copiedId === id ? "Copied" : `Copy ${idLabel}`}
                     onClick={(event) => {
                       event.stopPropagation();
                       void copyWorkspaceId(id);
@@ -289,8 +295,8 @@ export function WorkspaceTable({
                   <ActionsCell>
                     <DeleteRowButton
                       type="button"
-                      aria-label={`Remove workspace ${row.original.name}`}
-                      title="Remove workspace"
+                      aria-label={`Remove ${resourceLabel} ${row.original.name}`}
+                      title={`Remove ${resourceLabel}`}
                       disabled={isDeleting}
                       onClick={(event) => {
                         event.stopPropagation();
@@ -305,7 +311,7 @@ export function WorkspaceTable({
             }]
           : []),
       ] as ColumnDef<AFSWorkspaceSummary>[],
-    [connectedAgentsByWorkspace, copiedId, databaseSearchSupportById, deletingWorkspaceKey, onDeleteWorkspace, onOpenWorkspace, onOpenWorkspaceTab, onPreviewWorkspace, showActionsColumn],
+    [connectedAgentsByWorkspace, copiedId, databaseSearchSupportById, deletingWorkspaceKey, idLabel, onDeleteWorkspace, onOpenWorkspace, onOpenWorkspaceTab, onPreviewWorkspace, resourceLabel, showActionsColumn],
   );
 
   return (
@@ -315,7 +321,7 @@ export function WorkspaceTable({
         <S.SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search workspace, database, ..."
+          placeholder={`Search ${resourceLabel}, database, ...`}
         />
         <S.ToggleGroup>
           <S.ToggleButton
@@ -336,13 +342,13 @@ export function WorkspaceTable({
         {toolbarAction}
       </S.HeadingWrap>
 
-      {loading ? <S.EmptyState>Loading workspaces...</S.EmptyState> : null}
+      {loading ? <S.EmptyState>Loading {resourcePluralLabel}...</S.EmptyState> : null}
       {error ? <S.EmptyState role="alert">{errorMessage}</S.EmptyState> : null}
       {!loading && !error && filteredRows.length === 0 ? (
         <S.EmptyState>
           {isFiltering
-            ? "No workspaces match the current filter."
-            : "No workspaces yet. Use Add workspace to create one."}
+            ? `No ${resourcePluralLabel} match the current filter.`
+            : `No ${resourcePluralLabel} yet. Use the CLI to create one.`}
         </S.EmptyState>
       ) : null}
 
@@ -570,7 +576,7 @@ const DeleteRowButton = styled.button`
 `;
 
 const SizeCell = styled.span`
-  font-size: 13px;
+  font-size: 15px;
   color: var(--afs-ink, #18181b);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -613,7 +619,7 @@ const IdRow = styled.div`
 
 const IdText = styled.span`
   flex: 1 1 auto;
-  font-size: 11px;
+  font-size: 13.5px;
   color: var(--afs-muted, #71717a);
   line-height: 1.2;
   min-width: 0;
@@ -640,7 +646,7 @@ const TemplateChip = styled.button`
 `;
 
 const DatabaseName = styled.span`
-  font-size: 13px;
+  font-size: 15px;
   color: var(--afs-ink, #18181b);
   overflow-wrap: anywhere;
   white-space: normal;
@@ -649,7 +655,7 @@ const DatabaseName = styled.span`
 
 const SearchStatusText = styled.span`
   color: var(--afs-ink-soft);
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
 `;
@@ -690,7 +696,7 @@ const UpdatedStack = styled.div`
 `;
 
 const UpdatedDate = styled.span`
-  font-size: 13px;
+  font-size: 15px;
   color: var(--afs-ink, #18181b);
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
@@ -700,6 +706,7 @@ const UpdatedDate = styled.span`
 const WorkspaceNameButton = styled(S.WorkspaceNameButton)`
   && {
     flex: 1 1 auto;
+    font-size: 15px;
     font-weight: 700;
     min-width: 0;
     max-width: 100%;
@@ -709,7 +716,7 @@ const WorkspaceNameButton = styled(S.WorkspaceNameButton)`
 `;
 
 const UpdatedAgo = styled.span`
-  font-size: 11.5px;
+  font-size: 14px;
   color: var(--afs-muted, #71717a);
   line-height: 1.2;
   white-space: nowrap;

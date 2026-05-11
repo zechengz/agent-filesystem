@@ -382,7 +382,7 @@ export function TemplateInstallDetail({
           <HintLine>
             <strong>Prefer the CLI?</strong> Run{" "}
             <code>
-              afs mcp --workspace {workspace.name} --profile {template.profile}
+              afs mcp --volume {workspace.name} --profile {template.profile}
             </code>{" "}
             after <code>afs auth login</code> with the token above.
           </HintLine>
@@ -423,11 +423,12 @@ const ChoiceCard = styled(SurfaceCard).attrs({ as: "button", type: "button" })<{
   gap: 6px;
   padding: 14px;
   border: 1.5px solid
-    ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "var(--afs-line)")};
+    ${(p) => (p.$active ? "var(--afs-selection-border)" : "var(--afs-line)")};
   background: ${(p) =>
     p.$active
-      ? "color-mix(in srgb, var(--afs-accent, #2563eb) 8%, transparent)"
+      ? "var(--afs-selection-bg)"
       : "var(--afs-panel)"};
+  color: ${(p) => (p.$active ? "var(--afs-selection-text)" : "var(--afs-ink)")};
   text-align: left;
   cursor: ${(p) => (p.$disabled ? "not-allowed" : "pointer")};
   opacity: ${(p) => (p.$disabled && !p.$active ? 0.55 : 1)};
@@ -436,7 +437,9 @@ const ChoiceCard = styled(SurfaceCard).attrs({ as: "button", type: "button" })<{
     background 120ms ease;
 
   &:hover:not(:disabled) {
-    border-color: var(--afs-accent, #2563eb);
+    border-color: var(--afs-selection-border);
+    background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
+    color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
   }
 `;
 

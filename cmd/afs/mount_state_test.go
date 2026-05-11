@@ -93,7 +93,7 @@ func TestCmdStatusPrintsAlignedMountTable(t *testing.T) {
 	}
 	lines := nonEmptyLines(out)
 	statusLine := indexLine(lines, "AFS Running")
-	mountLine := indexLine(lines, "Mounted workspaces")
+	mountLine := indexLine(lines, "Mounted volumes")
 	if statusLine < 0 {
 		t.Fatalf("status output missing daemon status section:\n%s", out)
 	}
@@ -106,7 +106,7 @@ func TestCmdStatusPrintsAlignedMountTable(t *testing.T) {
 	if strings.Contains(stripAnsi(out), "AFS Not Running") {
 		t.Fatalf("status output should not say daemon is absent when mount daemons are running:\n%s", out)
 	}
-	statusSection := stripAnsi(strings.Split(out, "Mounted workspaces")[0])
+	statusSection := stripAnsi(strings.Split(out, "Mounted volumes")[0])
 	for _, label := range []string{"workspace", "mode", "daemon"} {
 		if statusSectionHasLabel(statusSection, label) {
 			t.Fatalf("status summary should not duplicate %s row when mount table is present:\n%s", label, out)
@@ -179,6 +179,118 @@ func TestCmdStatusMountTableShowsSourceWhenMountsCrossConfigs(t *testing.T) {
 	}
 }
 
+func TestCmdStatusAggregatesAgentWorkspaceMountRecords(t *testing.T) {
+	t.Helper()
+
+	homeDir := withTempHome(t)
+	workspaceRoot := filepath.Join(homeDir, "coding-agent")
+	repoPath := filepath.Join(workspaceRoot, "repo")
+	memoryPath := filepath.Join(workspaceRoot, "memory")
+	loosePath := filepath.Join(homeDir, "loose-volume")
+	reg := mountRegistry{Mounts: []mountRecord{
+		{
+			ID:                 "mnt_repo",
+			Workspace:          "repo",
+			WorkspaceID:        "ws_repo",
+			AgentWorkspace:     "coding-agent",
+			AgentWorkspaceID:   "agt_coding",
+			AgentWorkspaceRoot: workspaceRoot,
+			AgentWorkspacePath: "/repo",
+			LocalPath:          repoPath,
+			Mode:               modeSync,
+			PID:                os.Getpid(),
+			StartedAt:          time.Now().UTC(),
+		},
+		{
+			ID:                 "mnt_memory",
+			Workspace:          "memory",
+			WorkspaceID:        "ws_memory",
+			AgentWorkspace:     "coding-agent",
+			AgentWorkspaceID:   "agt_coding",
+			AgentWorkspaceRoot: workspaceRoot,
+			AgentWorkspacePath: "/memory",
+			LocalPath:          memoryPath,
+			Mode:               modeSync,
+			PID:                os.Getpid(),
+			StartedAt:          time.Now().UTC(),
+		},
+		{
+			ID:          "mnt_loose",
+			Workspace:   "loose-volume",
+			WorkspaceID: "ws_loose",
+			LocalPath:   loosePath,
+			Mode:        modeSync,
+			PID:         os.Getpid(),
+			StartedAt:   time.Now().UTC(),
+		},
+	}}
+	if err := saveMountRegistry(reg); err != nil {
+		t.Fatalf("saveMountRegistry() returned error: %v", err)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return cmdStatusWithOptions(statusOptions{})
+	})
+	if err != nil {
+		t.Fatalf("cmdStatusWithOptions() returned error: %v", err)
+	}
+	clean := stripAnsi(out)
+	for _, want := range []string{"Mounted workspaces", "coding-agent", homeRelativeDisplayPath(workspaceRoot), "Mounted volumes", "loose-volume"} {
+		if !strings.Contains(clean, want) {
+			t.Fatalf("status output missing %q:\n%s", want, clean)
+		}
+	}
+	workspaceSection := clean[strings.Index(clean, "Mounted workspaces"):]
+	if parts := strings.SplitN(workspaceSection, "Mounted volumes", 2); len(parts) == 2 {
+		workspaceSection = parts[0]
+	}
+	for _, unwanted := range []string{"repo", "memory", repoPath, memoryPath} {
+		if strings.Contains(workspaceSection, unwanted) {
+			t.Fatalf("workspace section should not show sub-volume %q:\n%s", unwanted, clean)
+		}
+	}
+}
+
+func TestCmdStatusVerboseKeepsSingleVolumeWorkspaceGrouped(t *testing.T) {
+	t.Helper()
+
+	homeDir := withTempHome(t)
+	workspaceRoot := filepath.Join(homeDir, "coding-agent")
+	repoPath := filepath.Join(workspaceRoot, "repo")
+	reg := mountRegistry{Mounts: []mountRecord{{
+		ID:                 "mnt_repo",
+		Workspace:          "repo",
+		WorkspaceID:        "ws_repo",
+		AgentWorkspace:     "coding-agent",
+		AgentWorkspaceID:   "agt_coding",
+		AgentWorkspaceRoot: workspaceRoot,
+		AgentWorkspacePath: "/repo",
+		LocalPath:          repoPath,
+		Mode:               modeSync,
+		PID:                os.Getpid(),
+		StartedAt:          time.Now().UTC(),
+	}}}
+	if err := saveMountRegistry(reg); err != nil {
+		t.Fatalf("saveMountRegistry() returned error: %v", err)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return cmdStatusWithOptions(statusOptions{verbose: true})
+	})
+	if err != nil {
+		t.Fatalf("cmdStatusWithOptions(verbose) returned error: %v", err)
+	}
+	clean := stripAnsi(out)
+	for _, want := range []string{"Mounted workspaces", "coding-agent", "volumes", "1", "volume", "repo /repo"} {
+		if !strings.Contains(clean, want) {
+			t.Fatalf("status verbose output missing %q:\n%s", want, clean)
+		}
+	}
+	if strings.Contains(clean, "\nrepo\n") {
+		t.Fatalf("single-volume Agent Workspace should not be printed as a standalone volume:\n%s", clean)
+	}
+}
+
 func TestCmdStatusMountTableDoesNotTruncatePathsAndUsesTilde(t *testing.T) {
 	t.Helper()
 
@@ -239,7 +351,7 @@ func TestCmdStatusDoesNotListStoppedRecordsAsMounted(t *testing.T) {
 	for _, want := range []string{
 		"AFS Not Running",
 		"No mounted workspaces.",
-		"Stopped workspace records",
+		"Stopped volume records",
 		"alpha",
 	} {
 		if !strings.Contains(clean, want) {
@@ -352,7 +464,7 @@ func TestCmdStatusVerboseIncludesConnectionDetails(t *testing.T) {
 		t.Fatalf("cmdStatusWithOptions(verbose) returned error: %v", err)
 	}
 	for _, want := range []string{
-		"Mounted workspaces",
+		"Stopped volume records",
 		"control plane  http://127.0.0.1:8091",
 		"database       local-dev",
 		"session        sess_123",

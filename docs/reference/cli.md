@@ -31,6 +31,7 @@ Primary commands:
 | `afs database` | Advanced control-plane database operations. |
 | `afs log` | Read workspace file-change logs and summaries. |
 | `afs config` | Read, persist, and reset local configuration. |
+| `afs tokens` | Create scoped CLI access tokens. |
 | `afs mcp` | Start the workspace-first MCP server over stdio. |
 | `afs skill` | Show or install the packaged AFS skill. |
 
@@ -56,6 +57,7 @@ Subcommands:
 afs auth login [--cloud] [--url <cloud-url>]
 afs auth login --self-hosted [--url <url>]
 afs auth login --control-plane-url <url> --token <token>
+afs auth login --control-plane-url <url> --access-token <token>
 ```
 
 Flags:
@@ -66,7 +68,13 @@ Flags:
 | `--self-hosted` | Force Self-managed mode. |
 | `--url`, `--control-plane-url <url>` | Override the control-plane URL. |
 | `--token <token>` | Use a one-time onboarding token instead of browser auth. |
+| `--access-token <token>` | Save a durable CLI access token directly. |
 | `--workspace <name|id>` | Preferred workspace for cloud login. |
+
+Plain browser login and one-time onboarding token exchange save an
+account-scoped CLI access token by default. `--access-token` is for an already
+minted CLI token, including a single-workspace mount token created with
+`afs tokens create`.
 
 Examples:
 
@@ -94,6 +102,56 @@ afs auth status
 
 Shows whether this machine is signed in, which control plane it targets, and
 the selected cloud database when available.
+
+## CLI Access Tokens
+
+### `afs tokens`
+
+```bash
+afs tokens [command]
+```
+
+Subcommands:
+
+| Command | Meaning |
+| --- | --- |
+| `afs tokens create` | Create a workspace-scoped CLI access token. |
+
+### `afs tokens create`
+
+```bash
+afs tokens create --workspace <workspace> [--permission ro|rw] [--expires 30d]
+afs tokens create <workspace> [--permission ro|rw]
+```
+
+Creates a CLI token scoped to one workspace for mount use. The default
+permission is read-write. `--permission ro` creates a read-only mount token;
+when that token is used with `afs auth login --access-token`, the mount session
+is forced read-only.
+
+Flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--workspace <name|id>` | Workspace the token may mount. |
+| `--use mount` | Token use. `mount` is currently the only supported value. |
+| `--permission ro\|rw` | Mount permission. Defaults to `rw`. |
+| `--expires <duration>` | Expiry such as `12h`, `30d`, `4w`, RFC3339, or `never`. |
+| `--name <label>` | Optional token label. |
+
+Examples:
+
+```bash
+afs tokens create --workspace repo --permission rw
+afs tokens create repo --permission ro --expires 7d --name "ci read-only mount"
+afs auth login --url https://afs.example.com --access-token afs_cli_...
+afs ws mount repo ~/repo
+```
+
+Workspace-scoped mount tokens can list only the workspace they are scoped to
+and can open client mount sessions for that workspace. Use a normal
+account-scoped login token for account, workspace-management, checkpoint, or
+MCP-token administration.
 
 ## First Run And Lifecycle
 

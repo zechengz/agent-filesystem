@@ -19,6 +19,7 @@ body,
 body {
   margin: 0;
   background: var(--afs-bg);
+  font-family: var(--afs-font-sans);
   transition: background 0.2s ease;
 }
 

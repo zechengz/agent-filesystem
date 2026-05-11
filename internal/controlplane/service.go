@@ -280,6 +280,7 @@ type workspaceSession struct {
 	Initialized              bool        `json:"initialized"`
 	HeartbeatIntervalSeconds int         `json:"heartbeat_interval_seconds,omitempty"`
 	LeaseExpiresAt           string      `json:"lease_expires_at,omitempty"`
+	Readonly                 bool        `json:"readonly,omitempty"`
 	Redis                    RedisConfig `json:"redis"`
 }
 
@@ -641,6 +642,7 @@ func (s *Service) CreateWorkspaceSession(ctx context.Context, workspace string, 
 		RedisKey:         redisKey,
 		HeadCheckpointID: headSavepoint,
 		Initialized:      initialized,
+		Readonly:         input.Readonly,
 		Redis:            s.cfg.RedisConfig,
 	}
 	if !shouldTrackWorkspaceSession(input) {

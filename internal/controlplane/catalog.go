@@ -146,11 +146,14 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_onboarding_tokens_expires_at ON onboarding_tokens(expires_at)`,
 		`CREATE TABLE IF NOT EXISTS cli_access_tokens (
 			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
 			owner_subject TEXT NOT NULL DEFAULT '',
 			owner_label TEXT NOT NULL DEFAULT '',
-			database_id TEXT NOT NULL,
-			workspace_id TEXT NOT NULL,
+			database_id TEXT NOT NULL DEFAULT '',
+			workspace_id TEXT NOT NULL DEFAULT '',
 			workspace_name TEXT NOT NULL DEFAULT '',
+			scope TEXT NOT NULL DEFAULT '',
+			capability TEXT NOT NULL DEFAULT '',
 			secret_hash TEXT NOT NULL,
 			created_at TEXT NOT NULL,
 			last_used_at TEXT NOT NULL DEFAULT '',
@@ -167,6 +170,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			workspace_id TEXT NOT NULL DEFAULT '',
 			workspace_name TEXT NOT NULL DEFAULT '',
 			scope TEXT NOT NULL DEFAULT '',
+			capability TEXT NOT NULL DEFAULT '',
 			profile TEXT NOT NULL DEFAULT '',
 			template_slug TEXT NOT NULL DEFAULT '',
 			readonly INTEGER NOT NULL DEFAULT 0,
@@ -204,12 +208,20 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			`ALTER TABLE session_catalog ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE onboarding_tokens ADD COLUMN IF NOT EXISTS owner_subject TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE onboarding_tokens ADD COLUMN IF NOT EXISTS owner_label TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE cli_access_tokens ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE cli_access_tokens ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE cli_access_tokens ADD COLUMN IF NOT EXISTS capability TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS profile TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS template_slug TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS template_slug TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS secret TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS capability TEXT NOT NULL DEFAULT ''`,
+			`UPDATE cli_access_tokens SET scope = 'account' WHERE scope = ''`,
+			`UPDATE cli_access_tokens SET capability = 'account' WHERE capability = ''`,
+			`CREATE INDEX IF NOT EXISTS idx_cli_access_tokens_scope ON cli_access_tokens(scope)`,
 			`UPDATE mcp_access_tokens SET scope = 'workspace:' || workspace_id WHERE scope = '' AND workspace_id <> ''`,
+			`UPDATE mcp_access_tokens SET capability = CASE profile WHEN 'workspace-ro' THEN 'ro' WHEN 'admin-ro' THEN 'ro' WHEN 'workspace-rw-checkpoint' THEN 'rw-checkpoint' WHEN 'admin-rw' THEN 'admin' ELSE 'rw' END WHERE capability = ''`,
 			`CREATE INDEX IF NOT EXISTS idx_mcp_access_tokens_scope ON mcp_access_tokens(scope)`,
 		}
 		for _, statement := range alterations {
@@ -234,11 +246,15 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 		`ALTER TABLE session_catalog ADD COLUMN label TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE onboarding_tokens ADD COLUMN owner_subject TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE onboarding_tokens ADD COLUMN owner_label TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE cli_access_tokens ADD COLUMN name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE cli_access_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE cli_access_tokens ADD COLUMN capability TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE mcp_access_tokens ADD COLUMN profile TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE workspace_catalog ADD COLUMN template_slug TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE mcp_access_tokens ADD COLUMN template_slug TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE mcp_access_tokens ADD COLUMN secret TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE mcp_access_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE mcp_access_tokens ADD COLUMN capability TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, statement := range sqliteAlterations {
 		if _, err := c.execContext(ctx, statement); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
@@ -246,7 +262,11 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 		}
 	}
 	sqliteBackfills := []string{
+		`UPDATE cli_access_tokens SET scope = 'account' WHERE scope = ''`,
+		`UPDATE cli_access_tokens SET capability = 'account' WHERE capability = ''`,
+		`CREATE INDEX IF NOT EXISTS idx_cli_access_tokens_scope ON cli_access_tokens(scope)`,
 		`UPDATE mcp_access_tokens SET scope = 'workspace:' || workspace_id WHERE scope = '' AND workspace_id <> ''`,
+		`UPDATE mcp_access_tokens SET capability = CASE profile WHEN 'workspace-ro' THEN 'ro' WHEN 'admin-ro' THEN 'ro' WHEN 'workspace-rw-checkpoint' THEN 'rw-checkpoint' WHEN 'admin-rw' THEN 'admin' ELSE 'rw' END WHERE capability = ''`,
 		`CREATE INDEX IF NOT EXISTS idx_mcp_access_tokens_scope ON mcp_access_tokens(scope)`,
 	}
 	for _, statement := range sqliteBackfills {

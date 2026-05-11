@@ -37,8 +37,8 @@ const MCP_COMMANDS: CommandsDrawerConfig = {
   sections: [
     {
       title: "Run local stdio MCP",
-      description: "Workspace-scoped, runs from your shell.",
-      command: "afs mcp --workspace my-workspace --profile workspace-rw",
+      description: "Volume-scoped, runs from your shell.",
+      command: "afs mcp --volume my-volume --profile workspace-rw",
     },
     {
       title: "Add to Codex CLI",
@@ -102,7 +102,7 @@ function MCPPage() {
     [databases],
   );
 
-  // Merge workspace-scoped tokens and control-plane tokens into one list.
+  // Merge volume-scoped tokens and control-plane tokens into one list.
   // Client-side filter for control-plane tokens (defensive — the backend
   // should only return control-plane entries to that query). Workspace list
   // already excludes scope-empty/control-plane rows by virtue of requiring a
@@ -179,7 +179,7 @@ function MCPPage() {
       <NoticeCard $tone="neutral" role="status">
         <NoticeTitle>Agent search tools are built in</NoticeTitle>
         <NoticeBody>
-          Workspace MCP tokens expose file_grep for exact evidence and file_query
+          Volume MCP tokens expose file_grep for exact evidence and file_query
           for RedisSearch BM25 ranked retrieval across Markdown, JSON, logs, and
           other text files.
         </NoticeBody>

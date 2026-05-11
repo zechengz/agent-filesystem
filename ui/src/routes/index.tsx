@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Loader } from "@redis-ui/components";
+import { useMemo } from "react";
 import styled from "styled-components";
 import { PageStack } from "../components/afs-kit";
 import { AgentHeroAnimation } from "../components/agent-hero-animation";
@@ -8,18 +9,27 @@ import { OnboardingPathCard } from "../components/onboarding-drawer";
 import type { OnboardingPath } from "../components/onboarding-drawer";
 import { QuickstartTipCard } from "../features/home/QuickstartTipCard";
 import { PublicLandingPage } from "../features/landing/PublicLandingPage";
+import { LiveTopologyCard } from "../components/live-topology-card";
 import { useDrawer } from "../foundation/drawer-context";
 import { afsApi } from "../foundation/api/afs";
 import { useAuthSession } from "../foundation/auth-context";
 import { useDatabaseScope, useScopedActivity, useScopedAgents, useScopedWorkspaceSummaries } from "../foundation/database-scope";
 import type { AFSDatabaseScopeRecord } from "../foundation/database-scope";
 import { ActivityTable } from "../foundation/tables/activity-table";
-import type { AFSActivityEvent, AFSAgentSession, AFSWorkspaceSummary } from "../foundation/types/afs";
+import type {
+  AFSActivityEvent,
+  AFSAgentSession,
+  AFSWorkspaceCompositionSummary,
+  AFSWorkspaceSummary,
+} from "../foundation/types/afs";
 import { queryClient } from "../foundation/query-client";
+import { groupMountedAgentWorkspaceSessions } from "../foundation/agent-session-grouping";
 import {
   agentsQueryOptions,
   databasesQueryOptions,
   useQuickstartMutation,
+  useWorkspaceCompositions,
+  workspaceCompositionsQueryOptions,
   workspaceSummariesQueryOptions,
 } from "../foundation/hooks/use-afs";
 
@@ -34,6 +44,10 @@ export const Route = createFileRoute("/")({
       queryClient.ensureQueryData({ ...databasesQueryOptions(), revalidateIfStale: true }),
       queryClient.ensureQueryData({
         ...workspaceSummariesQueryOptions(null),
+        revalidateIfStale: true,
+      }),
+      queryClient.ensureQueryData({
+        ...workspaceCompositionsQueryOptions(),
         revalidateIfStale: true,
       }),
       queryClient.ensureQueryData({ ...agentsQueryOptions(null), revalidateIfStale: true }),
@@ -55,11 +69,17 @@ function HomeRoute() {
 function OverviewPage() {
   const workspacesQuery = useScopedWorkspaceSummaries();
   const agentsQuery = useScopedAgents();
+  const agentWorkspacesQuery = useWorkspaceCompositions();
   const { databases, isLoading: databasesLoading } = useDatabaseScope();
   const quickstartMutation = useQuickstartMutation();
   const { open: openDrawer } = useDrawer();
 
-  if (databasesLoading || workspacesQuery.isLoading || agentsQuery.isLoading) {
+  if (
+    databasesLoading ||
+    workspacesQuery.isLoading ||
+    agentsQuery.isLoading ||
+    agentWorkspacesQuery.isLoading
+  ) {
     return <Loader data-testid="loader--spinner" />;
   }
 
@@ -90,6 +110,7 @@ function OverviewPage() {
     <InspectorView
       workspaces={workspaces}
       agents={agentsQuery.data}
+      agentWorkspaces={agentWorkspacesQuery.data ?? []}
       databases={databases}
       onChoosePath={handleChoosePath}
     />
@@ -105,17 +126,23 @@ function OverviewPage() {
 function InspectorView({
   workspaces,
   agents,
+  agentWorkspaces,
   databases,
   onChoosePath,
 }: {
   workspaces: AFSWorkspaceSummary[];
   agents: AFSAgentSession[];
+  agentWorkspaces: AFSWorkspaceCompositionSummary[];
   databases: AFSDatabaseScopeRecord[];
   onChoosePath: (path: OnboardingPath) => void;
 }) {
   const navigate = useNavigate();
   const activityQuery = useScopedActivity(50);
-  const connectedAgents = agents.length;
+  const groupedAgents = useMemo(
+    () => groupMountedAgentWorkspaceSessions(agents, agentWorkspaces),
+    [agents, agentWorkspaces],
+  );
+  const connectedAgents = groupedAgents.length;
   const opsPerMin = computeOpsPerMin(activityQuery.data);
   const hasQuickstartWorkspace = workspaces.some(
     (workspace) => workspace.name === "getting-started",
@@ -125,8 +152,8 @@ function InspectorView({
   function openActivity(event: AFSActivityEvent) {
     if (!event.workspaceId) return;
     void navigate({
-      to: "/workspaces/$workspaceId",
-      params: { workspaceId: event.workspaceId },
+      to: "/volumes/$volumeId",
+      params: { volumeId: event.workspaceId },
       search: {
         ...(event.databaseId ? { databaseId: event.databaseId } : {}),
         tab: "activity",
@@ -144,8 +171,14 @@ function InspectorView({
       />
 
       <MissionHudPanel
-        agents={agents}
-        onOpenAgents={() => void navigate({ to: "/agents" })}
+        agents={groupedAgents}
+        onOpenAgents={() => void navigate({ to: "/" })}
+      />
+
+      <LiveTopologyCard
+        agents={groupedAgents}
+        workspaces={workspaces}
+        agentWorkspaces={agentWorkspaces}
       />
 
       <ActivityCard>
@@ -635,10 +668,12 @@ const Benefit = styled.div`
   border: 1px solid var(--afs-line);
   border-radius: 16px;
   background: var(--afs-panel);
-  transition: border-color 180ms ease, transform 180ms ease;
+  transition: background 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease;
 
   &:hover {
-    border-color: color-mix(in srgb, var(--afs-accent, #2563eb) 30%, var(--afs-line));
+    border-color: var(--afs-selection-border);
+    background: var(--afs-selection-hover-bg);
+    color: var(--afs-selection-hover-ink);
     transform: translateY(-2px);
   }
 `;
@@ -824,7 +859,8 @@ const HudColRow = styled.div<{ $head?: boolean }>`
   text-transform: ${(p) => (p.$head ? "uppercase" : "none")};
 
   &:not(:first-child):hover {
-    background: color-mix(in srgb, var(--afs-accent) 6%, transparent);
+    background: var(--afs-selection-hover-bg);
+    color: var(--afs-selection-hover-ink);
   }
 `;
 
@@ -854,6 +890,7 @@ const HudHeaderLink = styled.button`
   letter-spacing: 0.06em;
 
   &:hover {
+    color: var(--afs-selection-hover-ink);
     text-decoration: underline;
   }
 `;
@@ -900,6 +937,7 @@ const HudHintLink = styled.button`
   letter-spacing: 0.04em;
 
   &:hover {
+    color: var(--afs-selection-hover-ink);
     text-decoration: underline;
   }
 `;
@@ -941,13 +979,20 @@ const TemplatesLinkCard = styled(SurfaceCard).attrs({ as: "a" })`
   padding: 18px 20px;
   color: inherit;
   text-decoration: none;
-  transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+  transition: background 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
 
   &:hover {
-    border-color: var(--afs-accent, #2563eb);
+    border-color: var(--afs-selection-border);
+    background: var(--afs-selection-hover-bg);
+    color: var(--afs-selection-hover-ink);
     box-shadow: 0 6px 20px rgba(8, 6, 13, 0.08);
     transform: translateY(-2px);
   }
+
+  &:hover span {
+    color: var(--afs-selection-hover-ink);
+  }
+
   @media (max-width: 640px) {
     align-items: flex-start;
   }

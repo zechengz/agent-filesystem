@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
+import { Route as VolumesRouteImport } from './routes/volumes'
 import { Route as TemplatesRouteImport } from './routes/templates'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -27,6 +28,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
+import { Route as VolumesVolumeIdRouteImport } from './routes/volumes.$volumeId'
 import { Route as SignupClerkPathRouteImport } from './routes/signup.$clerkPath'
 import { Route as McpConnectRouteImport } from './routes/mcp_.connect'
 import { Route as LoginClerkPathRouteImport } from './routes/login.$clerkPath'
@@ -45,6 +47,11 @@ import { Route as TemplatesInstalledWorkspaceIdRouteImport } from './routes/temp
 const WorkspacesRoute = WorkspacesRouteImport.update({
   id: '/workspaces',
   path: '/workspaces',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VolumesRoute = VolumesRouteImport.update({
+  id: '/volumes',
+  path: '/volumes',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TemplatesRoute = TemplatesRouteImport.update({
@@ -131,6 +138,11 @@ const WorkspacesWorkspaceIdRoute = WorkspacesWorkspaceIdRouteImport.update({
   id: '/$workspaceId',
   path: '/$workspaceId',
   getParentRoute: () => WorkspacesRoute,
+} as any)
+const VolumesVolumeIdRoute = VolumesVolumeIdRouteImport.update({
+  id: '/$volumeId',
+  path: '/$volumeId',
+  getParentRoute: () => VolumesRoute,
 } as any)
 const SignupClerkPathRoute = SignupClerkPathRouteImport.update({
   id: '/$clerkPath',
@@ -221,6 +233,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRouteWithChildren
   '/templates': typeof TemplatesRouteWithChildren
+  '/volumes': typeof VolumesRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/docs/cli': typeof DocsCliRoute
   '/docs/faq': typeof DocsFaqRoute
@@ -235,6 +248,7 @@ export interface FileRoutesByFullPath {
   '/login/$clerkPath': typeof LoginClerkPathRoute
   '/mcp/connect': typeof McpConnectRoute
   '/signup/$clerkPath': typeof SignupClerkPathRoute
+  '/volumes/$volumeId': typeof VolumesVolumeIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/templates/installed/$workspaceId': typeof TemplatesInstalledWorkspaceIdRoute
 }
@@ -255,6 +269,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRouteWithChildren
   '/templates': typeof TemplatesRouteWithChildren
+  '/volumes': typeof VolumesRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/docs/cli': typeof DocsCliRoute
   '/docs/faq': typeof DocsFaqRoute
@@ -269,6 +284,7 @@ export interface FileRoutesByTo {
   '/login/$clerkPath': typeof LoginClerkPathRoute
   '/mcp/connect': typeof McpConnectRoute
   '/signup/$clerkPath': typeof SignupClerkPathRoute
+  '/volumes/$volumeId': typeof VolumesVolumeIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/templates/installed/$workspaceId': typeof TemplatesInstalledWorkspaceIdRoute
 }
@@ -290,6 +306,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRouteWithChildren
   '/templates': typeof TemplatesRouteWithChildren
+  '/volumes': typeof VolumesRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/docs_/cli': typeof DocsCliRoute
   '/docs_/faq': typeof DocsFaqRoute
@@ -304,6 +321,7 @@ export interface FileRoutesById {
   '/login/$clerkPath': typeof LoginClerkPathRoute
   '/mcp_/connect': typeof McpConnectRoute
   '/signup/$clerkPath': typeof SignupClerkPathRoute
+  '/volumes/$volumeId': typeof VolumesVolumeIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/templates/installed/$workspaceId': typeof TemplatesInstalledWorkspaceIdRoute
 }
@@ -326,6 +344,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/signup'
     | '/templates'
+    | '/volumes'
     | '/workspaces'
     | '/docs/cli'
     | '/docs/faq'
@@ -340,6 +359,7 @@ export interface FileRouteTypes {
     | '/login/$clerkPath'
     | '/mcp/connect'
     | '/signup/$clerkPath'
+    | '/volumes/$volumeId'
     | '/workspaces/$workspaceId'
     | '/templates/installed/$workspaceId'
   fileRoutesByTo: FileRoutesByTo
@@ -360,6 +380,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/signup'
     | '/templates'
+    | '/volumes'
     | '/workspaces'
     | '/docs/cli'
     | '/docs/faq'
@@ -374,6 +395,7 @@ export interface FileRouteTypes {
     | '/login/$clerkPath'
     | '/mcp/connect'
     | '/signup/$clerkPath'
+    | '/volumes/$volumeId'
     | '/workspaces/$workspaceId'
     | '/templates/installed/$workspaceId'
   id:
@@ -394,6 +416,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/signup'
     | '/templates'
+    | '/volumes'
     | '/workspaces'
     | '/docs_/cli'
     | '/docs_/faq'
@@ -408,6 +431,7 @@ export interface FileRouteTypes {
     | '/login/$clerkPath'
     | '/mcp_/connect'
     | '/signup/$clerkPath'
+    | '/volumes/$volumeId'
     | '/workspaces/$workspaceId'
     | '/templates/installed/$workspaceId'
   fileRoutesById: FileRoutesById
@@ -429,6 +453,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SignupRoute: typeof SignupRouteWithChildren
   TemplatesRoute: typeof TemplatesRouteWithChildren
+  VolumesRoute: typeof VolumesRouteWithChildren
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
   DocsCliRoute: typeof DocsCliRoute
   DocsFaqRoute: typeof DocsFaqRoute
@@ -450,6 +475,13 @@ declare module '@tanstack/react-router' {
       path: '/workspaces'
       fullPath: '/workspaces'
       preLoaderRoute: typeof WorkspacesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/volumes': {
+      id: '/volumes'
+      path: '/volumes'
+      fullPath: '/volumes'
+      preLoaderRoute: typeof VolumesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/templates': {
@@ -570,6 +602,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/workspaces/$workspaceId'
       preLoaderRoute: typeof WorkspacesWorkspaceIdRouteImport
       parentRoute: typeof WorkspacesRoute
+    }
+    '/volumes/$volumeId': {
+      id: '/volumes/$volumeId'
+      path: '/$volumeId'
+      fullPath: '/volumes/$volumeId'
+      preLoaderRoute: typeof VolumesVolumeIdRouteImport
+      parentRoute: typeof VolumesRoute
     }
     '/signup/$clerkPath': {
       id: '/signup/$clerkPath'
@@ -705,6 +744,17 @@ const TemplatesRouteWithChildren = TemplatesRoute._addFileChildren(
   TemplatesRouteChildren,
 )
 
+interface VolumesRouteChildren {
+  VolumesVolumeIdRoute: typeof VolumesVolumeIdRoute
+}
+
+const VolumesRouteChildren: VolumesRouteChildren = {
+  VolumesVolumeIdRoute: VolumesVolumeIdRoute,
+}
+
+const VolumesRouteWithChildren =
+  VolumesRoute._addFileChildren(VolumesRouteChildren)
+
 interface WorkspacesRouteChildren {
   WorkspacesWorkspaceIdRoute: typeof WorkspacesWorkspaceIdRoute
 }
@@ -734,6 +784,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SignupRoute: SignupRouteWithChildren,
   TemplatesRoute: TemplatesRouteWithChildren,
+  VolumesRoute: VolumesRouteWithChildren,
   WorkspacesRoute: WorkspacesRouteWithChildren,
   DocsCliRoute: DocsCliRoute,
   DocsFaqRoute: DocsFaqRoute,

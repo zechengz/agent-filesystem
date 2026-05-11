@@ -76,6 +76,24 @@ export function SettingsTab({
   const [largeFileCutoffBytes, setLargeFileCutoffBytes] = useState("0");
   const [versioningError, setVersioningError] = useState<string | null>(null);
   const [versioningNotice, setVersioningNotice] = useState<string | null>(null);
+  const [detailsName, setDetailsName] = useState(workspace.name);
+  const [detailsDescription, setDetailsDescription] = useState(
+    workspace.description,
+  );
+  const [savedDetailsName, setSavedDetailsName] = useState(workspace.name);
+  const [savedDetailsDescription, setSavedDetailsDescription] = useState(
+    workspace.description,
+  );
+  const detailsDirty =
+    detailsName.trim() !== savedDetailsName ||
+    detailsDescription.trim() !== savedDetailsDescription;
+
+  useEffect(() => {
+    setDetailsName(workspace.name);
+    setDetailsDescription(workspace.description);
+    setSavedDetailsName(workspace.name);
+    setSavedDetailsDescription(workspace.description);
+  }, [workspace.description, workspace.id, workspace.name]);
 
   useEffect(() => {
     if (!versioningQuery.data) {
@@ -94,23 +112,35 @@ export function SettingsTab({
     <SectionGrid>
       <SectionCard $span={12}>
         <SectionHeader>
-          <SectionTitle title="Workspace details" />
+          <SectionTitle title="Volume details" />
         </SectionHeader>
 
         <FormGrid
           onSubmit={(event) => {
             event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            const name = String(form.get("name") ?? "").trim();
-            const description = String(form.get("description") ?? "").trim();
-            void onSave({ name, description });
+            const nextName = detailsName.trim();
+            const nextDescription = detailsDescription.trim();
+            void Promise.resolve(
+              onSave({
+                name: nextName,
+                description: nextDescription,
+              }),
+            )
+              .then(() => {
+                setSavedDetailsName(nextName);
+                setSavedDetailsDescription(nextDescription);
+              })
+              .catch(() => {
+                // Parent surfaces the save error in this form.
+              });
           }}
         >
           <Field>
-            Workspace name
+            Volume name
             <TextInput
               name="name"
-              defaultValue={workspace.name}
+              value={detailsName}
+              onChange={(event) => setDetailsName(event.currentTarget.value)}
               placeholder="customer-portal"
             />
           </Field>
@@ -119,8 +149,11 @@ export function SettingsTab({
             Description
             <TextInput
               name="description"
-              defaultValue={workspace.description}
-              placeholder="What this workspace is for, who owns it, and why it exists."
+              value={detailsDescription}
+              onChange={(event) =>
+                setDetailsDescription(event.currentTarget.value)
+              }
+              placeholder="What this volume stores, who owns it, and why it exists."
             />
           </Field>
 
@@ -129,7 +162,11 @@ export function SettingsTab({
           ) : null}
 
           <DialogActions style={{ justifyContent: "flex-end" }}>
-            <Button size="medium" type="submit" disabled={isSaving}>
+            <Button
+              size="medium"
+              type="submit"
+              disabled={!detailsName.trim() || !detailsDirty || isSaving}
+            >
               {isSaving ? "Saving..." : "Save changes"}
             </Button>
           </DialogActions>
@@ -138,7 +175,7 @@ export function SettingsTab({
         <MetaTable>
           <tbody>
             <MetaRow>
-              <MetaLabel>Workspace ID</MetaLabel>
+              <MetaLabel>Volume ID</MetaLabel>
               <MetaValue>
                 <MonoValue>{workspace.id}</MonoValue>
               </MetaValue>
@@ -194,7 +231,7 @@ export function SettingsTab({
                   <StorageText>
                     {queryIndexStatus.data
                       ? `RedisSearch BM25 query is ${queryIndexStatus.data.state}. ${queryIndexStatus.data.keyword.ready} file${queryIndexStatus.data.keyword.ready === 1 ? "" : "s"} ready across ${queryIndexStatus.data.keyword.chunks} chunk${queryIndexStatus.data.keyword.chunks === 1 ? "" : "s"}.`
-                      : "AFS is checking the BM25 query index for this workspace."}
+                      : "AFS is checking the BM25 query index for this volume."}
                   </StorageText>
                   {queryIndexStatus.data?.keyword.indexName ? (
                     <MonoValue>{queryIndexStatus.data.keyword.indexName}</MonoValue>
@@ -218,7 +255,7 @@ export function SettingsTab({
         </SectionHeader>
 
         <VersioningCopy>
-          The live file tree still shows only the latest workspace state. This
+          The live file tree still shows only the latest volume state. This
           policy controls which paths get immutable per-file history behind the
           scenes and how aggressively old versions are retained.
         </VersioningCopy>
@@ -240,7 +277,7 @@ export function SettingsTab({
                 maxAgeDays: parseWholeNumber(maxAgeDays, "Max age (days)"),
                 maxTotalBytes: parseWholeNumber(
                   maxTotalBytes,
-                  "Workspace budget (bytes)",
+                  "Volume budget (bytes)",
                 ),
                 largeFileCutoffBytes: parseWholeNumber(
                   largeFileCutoffBytes,
@@ -383,7 +420,7 @@ export function SettingsTab({
             </Field>
 
             <Field>
-              Workspace budget (bytes)
+              Volume budget (bytes)
               <TextInput
                 value={maxTotalBytes}
                 onChange={(event) =>
@@ -449,9 +486,9 @@ export function SettingsTab({
         </SectionHeader>
 
         <AccessCopy>
-          MCP setup now lives on the Agents page so you can manage all
-          workspace-scoped access tokens and config snippets in one place. This
-          panel stays focused on the current workspace and shows whether it
+          MCP setup now lives on the MCP page so you can manage all
+          volume-scoped access tokens and config snippets in one place. This
+          panel stays focused on the current volume and shows whether it
           already has authorized MCP access.
         </AccessCopy>
 
@@ -466,16 +503,16 @@ export function SettingsTab({
               </MetaValue>
             </MetaRow>
             <MetaRow>
-              <MetaLabel>Workspace scope</MetaLabel>
+              <MetaLabel>Volume scope</MetaLabel>
               <MetaValue>
-                All MCP tokens created from this workspace stay locked to{" "}
+                All MCP tokens created from this volume stay locked to{" "}
                 {workspace.name}.
               </MetaValue>
             </MetaRow>
             <MetaRow>
               <MetaLabel>Admin tools</MetaLabel>
               <MetaValue>
-                Workspace settings no longer mint admin access tokens. Use the
+                Volume settings no longer mint admin access tokens. Use the
                 access token console for explicit elevated flows.
               </MetaValue>
             </MetaRow>
@@ -537,10 +574,10 @@ export function SettingsTab({
 
       <DangerZoneCard>
         <DangerZoneHeader>
-          <DangerZoneTitle>Delete workspace</DangerZoneTitle>
+          <DangerZoneTitle>Delete volume</DangerZoneTitle>
           <DangerZoneDesc>
             Permanently remove <strong>{workspace.name}</strong> from the
-            workspace registry.
+            volume registry.
           </DangerZoneDesc>
         </DangerZoneHeader>
         <DangerZoneActions>
@@ -549,7 +586,7 @@ export function SettingsTab({
             disabled={isDeleting}
             onClick={onDelete}
           >
-            {isDeleting ? "Deleting..." : "Delete workspace"}
+            {isDeleting ? "Deleting..." : "Delete volume"}
           </DeleteWorkspaceButton>
         </DangerZoneActions>
       </DangerZoneCard>
@@ -1001,7 +1038,7 @@ function storageProfileDescription(storage: AFSWorkspaceContentStorage) {
     case "legacy":
       return `All ${storage.fileCount} file${storage.fileCount === 1 ? "" : "s"} use legacy Redis string content keys.`;
     default:
-      return "This workspace does not have any file content stored yet.";
+      return "This volume does not have any file content stored yet.";
   }
 }
 
@@ -1077,13 +1114,13 @@ function searchIndexDescription(index: AFSWorkspaceSearchIndex) {
     case "building":
       return `Search index exists and is ${formatPercent(index.percentIndexed)} indexed.`;
     case "missing":
-      return "No RediSearch index exists for this workspace yet.";
+      return "No RediSearch index exists for this volume yet.";
     case "unavailable":
       return "RediSearch is not available on this Redis database.";
     case "error":
       return index.error
-        ? `AFS could not inspect this workspace index: ${index.error}`
-        : "AFS could not inspect this workspace index.";
+        ? `AFS could not inspect this volume index: ${index.error}`
+        : "AFS could not inspect this volume index.";
     default:
       return "AFS could not determine search index state.";
   }

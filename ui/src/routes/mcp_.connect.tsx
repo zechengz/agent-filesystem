@@ -296,8 +296,8 @@ const ClientTab = styled.button<{ $selected: boolean }>`
   border-radius: 8px;
   border: 0;
   background: ${({ $selected }) =>
-    $selected ? "var(--afs-accent, #2563eb)" : "transparent"};
-  color: ${({ $selected }) => ($selected ? "#fff" : "var(--afs-ink)")};
+    $selected ? "var(--afs-selection-bg)" : "transparent"};
+  color: ${({ $selected }) => ($selected ? "var(--afs-selection-text)" : "var(--afs-ink)")};
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -306,8 +306,9 @@ const ClientTab = styled.button<{ $selected: boolean }>`
   &:hover {
     background: ${({ $selected }) =>
       $selected
-        ? "var(--afs-accent, #2563eb)"
-        : "color-mix(in srgb, var(--afs-accent, #2563eb) 12%, transparent)"};
+        ? "var(--afs-selection-bg)"
+        : "var(--afs-selection-hover-bg)"};
+    color: ${({ $selected }) => ($selected ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
   }
 `;
 

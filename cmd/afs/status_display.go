@@ -481,39 +481,197 @@ func printMountStatus(reg mountRegistry, verbose bool) {
 		fmt.Println()
 		return
 	}
-	running, stopped := splitMountRecords(reg.Mounts)
-	if len(running) > 0 {
+	workspaces, volumes := mountStatusItems(reg.Mounts)
+	runningWorkspaces, stoppedWorkspaces := splitMountStatusItems(workspaces)
+	runningVolumes, stoppedVolumes := splitMountStatusItems(volumes)
+	if len(runningWorkspaces) > 0 {
 		fmt.Println()
 		fmt.Println("Mounted workspaces")
 		fmt.Println()
-		headers := mountSummaryHeaders(running)
-		printPlainTable(headers, mountSummaryRows(running))
-	} else if verbose && len(stopped) > 0 {
+		headers := mountStatusItemHeaders(runningWorkspaces, "Workspace")
+		printPlainTable(headers, mountStatusItemRows(runningWorkspaces))
+	} else if verbose && len(stoppedWorkspaces) > 0 {
 		fmt.Println()
 		fmt.Println("Mounted workspaces")
 		fmt.Println()
-		headers := mountSummaryHeaders(stopped)
-		printPlainTable(headers, mountSummaryRows(stopped))
-	} else {
+		headers := mountStatusItemHeaders(stoppedWorkspaces, "Workspace")
+		printPlainTable(headers, mountStatusItemRows(stoppedWorkspaces))
+	} else if len(runningVolumes) == 0 {
 		fmt.Println()
 		fmt.Println("No mounted workspaces.")
 	}
-	if len(stopped) > 0 {
+	if len(runningVolumes) > 0 {
+		fmt.Println()
+		fmt.Println("Mounted volumes")
+		fmt.Println()
+		headers := mountStatusItemHeaders(runningVolumes, "Volume")
+		printPlainTable(headers, mountStatusItemRows(runningVolumes))
+	}
+	if len(stoppedWorkspaces) > 0 {
 		fmt.Println()
 		fmt.Println("Stopped workspace records")
 		fmt.Println()
-		headers := mountSummaryHeaders(stopped)
-		printPlainTable(headers, mountSummaryRows(stopped))
+		headers := mountStatusItemHeaders(stoppedWorkspaces, "Workspace")
+		printPlainTable(headers, mountStatusItemRows(stoppedWorkspaces))
+	}
+	if len(stoppedVolumes) > 0 {
+		fmt.Println()
+		fmt.Println("Stopped volume records")
+		fmt.Println()
+		headers := mountStatusItemHeaders(stoppedVolumes, "Volume")
+		printPlainTable(headers, mountStatusItemRows(stoppedVolumes))
 	}
 	if !verbose {
 		fmt.Println()
 		return
 	}
-	for _, rec := range append(running, stopped...) {
+	for _, item := range append(append(append(runningWorkspaces, runningVolumes...), stoppedWorkspaces...), stoppedVolumes...) {
 		fmt.Println()
-		printMountVerbose(rec)
+		printMountStatusItemVerbose(item)
 	}
 	fmt.Println()
+}
+
+type mountStatusItem struct {
+	Name                 string
+	Status               string
+	Mode                 string
+	ProductMode          string
+	ControlPlaneURL      string
+	ControlPlaneDatabase string
+	RedisAddr            string
+	RedisDB              int
+	Path                 string
+	Records              []mountRecord
+}
+
+func mountStatusItems(records []mountRecord) (workspaces []mountStatusItem, volumes []mountStatusItem) {
+	workspaceGroups := make(map[string][]mountRecord)
+	for _, rec := range sortedMountRecords(records) {
+		if key := agentWorkspaceMountKey(rec); key != "" {
+			workspaceGroups[key] = append(workspaceGroups[key], rec)
+			continue
+		}
+		volumes = append(volumes, mountStatusItemFromRecords([]mountRecord{rec}, rec.Workspace, rec.LocalPath))
+	}
+	for _, group := range workspaceGroups {
+		name := strings.TrimSpace(group[0].AgentWorkspace)
+		if name == "" {
+			name = strings.TrimSpace(group[0].AgentWorkspaceID)
+		}
+		workspaces = append(workspaces, mountStatusItemFromRecords(group, name, group[0].AgentWorkspaceRoot))
+	}
+	sort.Slice(workspaces, func(i, j int) bool {
+		left := strings.ToLower(workspaces[i].Name)
+		right := strings.ToLower(workspaces[j].Name)
+		if left == right {
+			return workspaces[i].Path < workspaces[j].Path
+		}
+		return left < right
+	})
+	sort.Slice(volumes, func(i, j int) bool {
+		left := strings.ToLower(volumes[i].Name)
+		right := strings.ToLower(volumes[j].Name)
+		if left == right {
+			return volumes[i].Path < volumes[j].Path
+		}
+		return left < right
+	})
+	return workspaces, volumes
+}
+
+func agentWorkspaceMountKey(rec mountRecord) string {
+	root := strings.TrimSpace(rec.AgentWorkspaceRoot)
+	name := strings.TrimSpace(rec.AgentWorkspace)
+	id := strings.TrimSpace(rec.AgentWorkspaceID)
+	if root == "" || (name == "" && id == "") {
+		return ""
+	}
+	return id + "\x00" + name + "\x00" + filepath.Clean(root)
+}
+
+func mountStatusItemFromRecords(records []mountRecord, name, path string) mountStatusItem {
+	item := mountStatusItem{
+		Name:    strings.TrimSpace(name),
+		Status:  mountStatusForRecords(records),
+		Mode:    commonMountRecordValue(records, func(rec mountRecord) string { return rec.Mode }, "mixed"),
+		Path:    filepath.Clean(path),
+		Records: append([]mountRecord(nil), records...),
+	}
+	if item.Mode == "" {
+		item.Mode = "unknown"
+	}
+	item.ProductMode = commonMountRecordValue(records, func(rec mountRecord) string { return rec.ProductMode }, "")
+	item.ControlPlaneURL = commonMountRecordValue(records, func(rec mountRecord) string { return rec.ControlPlaneURL }, "")
+	item.ControlPlaneDatabase = commonMountRecordValue(records, func(rec mountRecord) string { return rec.ControlPlaneDatabase }, "")
+	item.RedisAddr = commonMountRecordValue(records, func(rec mountRecord) string { return rec.RedisAddr }, "")
+	item.RedisDB = commonMountRecordDB(records)
+	if item.Name == "" && len(records) > 0 {
+		item.Name = records[0].Workspace
+	}
+	return item
+}
+
+func mountStatusForRecords(records []mountRecord) string {
+	running := 0
+	stopped := 0
+	for _, rec := range records {
+		if mountStatus(rec) == "running" {
+			running++
+			continue
+		}
+		stopped++
+	}
+	switch {
+	case running > 0 && stopped > 0:
+		return "partial"
+	case running > 0:
+		return "running"
+	default:
+		return "stopped"
+	}
+}
+
+func commonMountRecordValue(records []mountRecord, value func(mountRecord) string, mixed string) string {
+	common := ""
+	for _, rec := range records {
+		current := strings.TrimSpace(value(rec))
+		if current == "" {
+			continue
+		}
+		if common == "" {
+			common = current
+			continue
+		}
+		if common != current {
+			return mixed
+		}
+	}
+	return common
+}
+
+func commonMountRecordDB(records []mountRecord) int {
+	if len(records) == 0 {
+		return 0
+	}
+	common := records[0].RedisDB
+	for _, rec := range records[1:] {
+		if rec.RedisDB != common {
+			return 0
+		}
+	}
+	return common
+}
+
+func splitMountStatusItems(items []mountStatusItem) (running []mountStatusItem, stopped []mountStatusItem) {
+	for _, item := range items {
+		if item.Status == "running" || item.Status == "partial" {
+			running = append(running, item)
+			continue
+		}
+		stopped = append(stopped, item)
+	}
+	return running, stopped
 }
 
 func sortedMountRecords(records []mountRecord) []mountRecord {
@@ -717,51 +875,54 @@ func daemonStatusSummary(pids []int) string {
 	}
 }
 
-func mountSummaryHeaders(mounts []mountRecord) []string {
-	headers := []string{"Workspace", "Status", "Mode"}
-	if mountSummaryShowsScope(mounts) {
+func mountStatusItemHeaders(items []mountStatusItem, nameHeader string) []string {
+	if strings.TrimSpace(nameHeader) == "" {
+		nameHeader = "Workspace"
+	}
+	headers := []string{nameHeader, "Status", "Mode"}
+	if mountStatusItemShowsScope(items) {
 		headers = append(headers, "Source", "Database")
 	}
 	return append(headers, "Path")
 }
 
-func mountSummaryRows(mounts []mountRecord) [][]string {
-	rows := make([][]string, 0, len(mounts))
-	showScope := mountSummaryShowsScope(mounts)
-	for _, rec := range mounts {
-		mode := strings.TrimSpace(rec.Mode)
+func mountStatusItemRows(items []mountStatusItem) [][]string {
+	rows := make([][]string, 0, len(items))
+	showScope := mountStatusItemShowsScope(items)
+	for _, item := range items {
+		mode := strings.TrimSpace(item.Mode)
 		if mode == "" {
 			mode = "unknown"
 		}
-		row := []string{rec.Workspace, mountStatus(rec), mode}
+		row := []string{item.Name, item.Status, mode}
 		if showScope {
-			row = append(row, mountSummarySource(rec), mountSummaryDatabase(rec))
+			row = append(row, mountStatusItemSource(item), mountStatusItemDatabase(item))
 		}
-		row = append(row, homeRelativeDisplayPath(rec.LocalPath))
+		row = append(row, homeRelativeDisplayPath(item.Path))
 		rows = append(rows, row)
 	}
 	return rows
 }
 
-func mountSummaryShowsScope(mounts []mountRecord) bool {
-	for _, rec := range mounts {
-		if strings.TrimSpace(rec.ProductMode) != "" || strings.TrimSpace(rec.ControlPlaneURL) != "" || strings.TrimSpace(rec.ControlPlaneDatabase) != "" {
+func mountStatusItemShowsScope(items []mountStatusItem) bool {
+	for _, item := range items {
+		if strings.TrimSpace(item.ProductMode) != "" || strings.TrimSpace(item.ControlPlaneURL) != "" || strings.TrimSpace(item.ControlPlaneDatabase) != "" {
 			return true
 		}
 	}
 	return false
 }
 
-func mountSummarySource(rec mountRecord) string {
-	return productModeDisplayLabel(mountRecordProductMode(rec))
+func mountStatusItemSource(item mountStatusItem) string {
+	return productModeDisplayLabel(mountRecordProductMode(mountRecord{ProductMode: item.ProductMode, ControlPlaneURL: item.ControlPlaneURL}))
 }
 
-func mountSummaryDatabase(rec mountRecord) string {
-	if db := strings.TrimSpace(rec.ControlPlaneDatabase); db != "" {
+func mountStatusItemDatabase(item mountStatusItem) string {
+	if db := strings.TrimSpace(item.ControlPlaneDatabase); db != "" {
 		return db
 	}
-	if addr := strings.TrimSpace(rec.RedisAddr); addr != "" {
-		return redisDatabaseLabel(addr, rec.RedisDB, false)
+	if addr := strings.TrimSpace(item.RedisAddr); addr != "" {
+		return redisDatabaseLabel(addr, item.RedisDB, false)
 	}
 	return "-"
 }
@@ -828,6 +989,37 @@ func printMountVerbose(rec mountRecord) {
 		fmt.Printf("%s  %s\n", padVisibleText(label, width), value)
 	}
 	fmt.Printf("\n")
+}
+
+func printMountStatusItemVerbose(item mountStatusItem) {
+	if len(item.Records) == 1 && agentWorkspaceMountKey(item.Records[0]) == "" {
+		printMountVerbose(item.Records[0])
+		return
+	}
+	rows := []outputRow{
+		{Label: "workspace", Value: item.Name},
+		{Label: "status", Value: item.Status},
+		{Label: "mode", Value: fallbackString(item.Mode, "unknown")},
+		{Label: "path", Value: homeRelativeDisplayPath(item.Path)},
+		{Label: "volumes", Value: fmt.Sprintf("%d", len(item.Records))},
+	}
+	if source := mountStatusItemSource(item); strings.TrimSpace(source) != "" {
+		rows = append(rows, outputRow{Label: "config source", Value: source})
+	}
+	if db := mountStatusItemDatabase(item); db != "-" {
+		rows = append(rows, outputRow{Label: "database", Value: db})
+	}
+	for _, rec := range sortedMountRecords(item.Records) {
+		value := strings.TrimSpace(rec.Workspace)
+		if mountPath := strings.TrimSpace(rec.AgentWorkspacePath); mountPath != "" {
+			value += " " + mountPath
+		}
+		if path := strings.TrimSpace(rec.LocalPath); path != "" {
+			value += " -> " + homeRelativeDisplayPath(path)
+		}
+		rows = append(rows, outputRow{Label: "volume", Value: value})
+	}
+	printSection(item.Name, rows)
 }
 
 func fallbackString(value, fallback string) string {
@@ -973,8 +1165,8 @@ func printReadyBox(cfg config, backendName, _ string) {
 	}
 	if backendName == mountBackendNone {
 		rows = append(rows, outputRow{})
-		rows = append(rows, outputRow{Label: "create", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws create <workspace>")})
-		rows = append(rows, outputRow{Label: "import", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws import <workspace> <directory>")})
+		rows = append(rows, outputRow{Label: "create", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" vol create <volume>")})
+		rows = append(rows, outputRow{Label: "import", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" vol import <volume> <directory>")})
 		printSection(title, rows)
 		return
 	}

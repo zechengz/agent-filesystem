@@ -376,8 +376,8 @@ const TabItem = styled.button<{ $active?: boolean }>`
   align-items: center;
   gap: 8px;
   border: none;
-  background: ${(p) => (p.$active ? "var(--afs-panel)" : "transparent")};
-  color: ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "var(--afs-muted)")};
+  background: ${(p) => (p.$active ? "var(--afs-selection-bg)" : "transparent")};
+  color: ${(p) => (p.$active ? "var(--afs-selection-text)" : "var(--afs-muted)")};
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -397,11 +397,12 @@ const TabItem = styled.button<{ $active?: boolean }>`
     right: 0;
     bottom: -1px;
     height: 2px;
-    background: ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "transparent")};
+    background: ${(p) => (p.$active ? "var(--afs-selection-indicator)" : "transparent")};
   }
 
   &:hover {
-    color: var(--afs-accent, #2563eb);
+    background: var(--afs-selection-hover-bg);
+    color: ${(p) => (p.$active ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
   }
 `;
 

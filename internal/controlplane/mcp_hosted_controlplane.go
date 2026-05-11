@@ -394,6 +394,7 @@ func (p *hostedMCPProvider) dispatchControlPlaneTool(ctx context.Context, name s
 			"server_name": serverName,
 			"workspace":   response.WorkspaceName,
 			"scope":       response.Scope,
+			"capability":  response.Capability,
 			"profile":     response.Profile,
 			"expires_at":  response.ExpiresAt,
 		}, nil

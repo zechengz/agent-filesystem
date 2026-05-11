@@ -12,10 +12,11 @@ func (c *workspaceCatalog) CreateCLIAccessToken(ctx context.Context, item cliAcc
 	if strings.TrimSpace(item.ID) == "" {
 		return fmt.Errorf("cli token id is required")
 	}
-	if strings.TrimSpace(item.DatabaseID) == "" {
+	scope := normalizeCLITokenScope(item.Scope)
+	if isWorkspaceCLIScope(scope) && strings.TrimSpace(item.DatabaseID) == "" {
 		return fmt.Errorf("cli token database is required")
 	}
-	if strings.TrimSpace(item.WorkspaceID) == "" {
+	if isWorkspaceCLIScope(scope) && strings.TrimSpace(item.WorkspaceID) == "" {
 		return fmt.Errorf("cli token workspace is required")
 	}
 	if strings.TrimSpace(item.SecretHash) == "" {
@@ -23,23 +24,29 @@ func (c *workspaceCatalog) CreateCLIAccessToken(ctx context.Context, item cliAcc
 	}
 	_, err := c.execContext(ctx, c.rebind(`INSERT INTO cli_access_tokens (
 		id,
+		name,
 		owner_subject,
 		owner_label,
 		database_id,
 		workspace_id,
 		workspace_name,
+		scope,
+		capability,
 		secret_hash,
 		created_at,
 		last_used_at,
 		expires_at,
 		revoked_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		strings.TrimSpace(item.ID),
+		strings.TrimSpace(item.Name),
 		strings.TrimSpace(item.OwnerSubject),
 		strings.TrimSpace(item.OwnerLabel),
 		strings.TrimSpace(item.DatabaseID),
 		strings.TrimSpace(item.WorkspaceID),
 		strings.TrimSpace(item.WorkspaceName),
+		scope,
+		normalizeCLITokenCapability(scope, item.Capability),
 		strings.TrimSpace(item.SecretHash),
 		strings.TrimSpace(item.CreatedAt),
 		strings.TrimSpace(item.LastUsedAt),
@@ -52,11 +59,14 @@ func (c *workspaceCatalog) CreateCLIAccessToken(ctx context.Context, item cliAcc
 func (c *workspaceCatalog) GetCLIAccessToken(ctx context.Context, tokenID string) (cliAccessTokenRecord, error) {
 	rows, err := c.queryContext(ctx, c.rebind(`SELECT
 		id,
+		name,
 		owner_subject,
 		owner_label,
 		database_id,
 		workspace_id,
 		workspace_name,
+		scope,
+		capability,
 		secret_hash,
 		created_at,
 		last_used_at,
@@ -101,11 +111,14 @@ func scanCLIAccessTokenRows(rows *sql.Rows) ([]cliAccessTokenRecord, error) {
 		var item cliAccessTokenRecord
 		if err := rows.Scan(
 			&item.ID,
+			&item.Name,
 			&item.OwnerSubject,
 			&item.OwnerLabel,
 			&item.DatabaseID,
 			&item.WorkspaceID,
 			&item.WorkspaceName,
+			&item.Scope,
+			&item.Capability,
 			&item.SecretHash,
 			&item.CreatedAt,
 			&item.LastUsedAt,

@@ -100,12 +100,14 @@ func cmdLogin(args []string) error {
 
 	var controlPlaneURL optionalString
 	var token optionalString
+	var accessToken optionalString
 	var workspace optionalString
 	var cloud bool
 	var selfHosted bool
 	fs.Var(&controlPlaneURL, "control-plane-url", "http:// or https:// hosted control plane URL")
 	fs.Var(&controlPlaneURL, "url", "alias for --control-plane-url")
 	fs.Var(&token, "token", "one-time onboarding token from the control plane")
+	fs.Var(&accessToken, "access-token", "durable CLI access token")
 	fs.Var(&workspace, "workspace", "preferred workspace id or name for browser login")
 	fs.BoolVar(&cloud, "cloud", false, "force cloud mode (browser OAuth)")
 	fs.BoolVar(&selfHosted, "self-hosted", false, "force self-hosted mode (URL-only)")
@@ -119,11 +121,17 @@ func cmdLogin(args []string) error {
 	if cloud && selfHosted {
 		return fmt.Errorf("--cloud and --self-hosted are mutually exclusive")
 	}
+	if strings.TrimSpace(token.value) != "" && strings.TrimSpace(accessToken.value) != "" {
+		return fmt.Errorf("--token and --access-token are mutually exclusive")
+	}
 
 	cfg := loadConfigOrDefault()
-	mode, err := resolveLoginMode(cfg, cloud, selfHosted, controlPlaneURL.value, token.value)
+	mode, err := resolveLoginMode(cfg, cloud, selfHosted, controlPlaneURL.value, token.value, accessToken.value)
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(accessToken.value) != "" {
+		return runAccessTokenLogin(&cfg, mode, controlPlaneURL.value, accessToken.value)
 	}
 
 	switch mode {
@@ -139,12 +147,18 @@ func cmdLogin(args []string) error {
 // resolveLoginMode picks cloud vs self-hosted based on flags, token/URL
 // inference, then asks the user. Saved config only influences the default
 // prompt choice; it does not skip the question.
-func resolveLoginMode(cfg config, cloud, selfHosted bool, overrideURL, overrideToken string) (string, error) {
+func resolveLoginMode(cfg config, cloud, selfHosted bool, overrideURL, overrideToken, overrideAccessToken string) (string, error) {
 	if cloud {
 		return productModeCloud, nil
 	}
 	if selfHosted {
 		return productModeSelfHosted, nil
+	}
+	if strings.TrimSpace(overrideAccessToken) != "" {
+		if strings.TrimSpace(overrideURL) != "" && looksLikeSelfHostedURL(overrideURL) {
+			return productModeSelfHosted, nil
+		}
+		return productModeCloud, nil
 	}
 	// An explicit onboarding token is a cloud-flow signal — self-hosted has
 	// no token exchange. This covers the common test/CI path where the URL
@@ -340,8 +354,83 @@ func runCloudLogin(cfg *config, overrideURL, overrideToken, workspace string) er
 		{Label: "workspace", Value: cfg.CurrentWorkspace},
 		{Label: "database", Value: cfg.DatabaseID},
 		{},
-		{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws mount "+workspaceHint(cfg.CurrentWorkspace)+" <directory>")},
+		{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" vol mount "+workspaceHint(cfg.CurrentWorkspace)+" <directory>")},
 	})
+	return nil
+}
+
+func runAccessTokenLogin(cfg *config, mode, overrideURL, accessToken string) error {
+	baseURL := strings.TrimSpace(overrideURL)
+	if baseURL == "" {
+		if mode == productModeSelfHosted {
+			prior := strings.TrimSpace(cfg.URL)
+			if prior != "" && looksLikeSelfHostedURL(prior) {
+				baseURL = prior
+			}
+			if baseURL == "" {
+				baseURL = defaultSelfHostedControlPlaneURL
+			}
+		} else {
+			prior := strings.TrimSpace(cfg.URL)
+			if prior != "" && !looksLikeSelfHostedURL(prior) {
+				baseURL = prior
+			}
+			if baseURL == "" {
+				baseURL = defaultCloudControlPlaneURL
+			}
+		}
+	}
+	normalizedURL, err := normalizeControlPlaneURL(baseURL)
+	if err != nil {
+		return err
+	}
+	probeCfg := *cfg
+	probeCfg.ProductMode = mode
+	probeCfg.URL = normalizedURL
+	probeCfg.AuthToken = strings.TrimSpace(accessToken)
+	client, _, err := newHTTPControlPlaneClient(context.Background(), probeCfg)
+	if err != nil {
+		return err
+	}
+	workspaces, err := client.ListWorkspaceSummaries(context.Background())
+	if err != nil {
+		return fmt.Errorf("access token login failed: %w", err)
+	}
+
+	cfg.ProductMode = mode
+	cfg.URL = normalizedURL
+	cfg.AuthToken = strings.TrimSpace(accessToken)
+	cfg.Mode = modeSync
+	cfg.CurrentWorkspace = ""
+	cfg.CurrentWorkspaceID = ""
+	cfg.DatabaseID = ""
+	if len(workspaces.Items) == 1 {
+		cfg.DatabaseID = strings.TrimSpace(workspaces.Items[0].DatabaseID)
+		cfg.CurrentWorkspaceID = strings.TrimSpace(workspaces.Items[0].ID)
+		cfg.CurrentWorkspace = strings.TrimSpace(workspaces.Items[0].Name)
+	}
+
+	if err := resolveConfigPaths(cfg); err != nil {
+		return err
+	}
+	if err := saveConfig(*cfg); err != nil {
+		return err
+	}
+
+	rows := []outputRow{
+		{Label: "control plane", Value: cfg.URL},
+	}
+	if cfg.CurrentWorkspace != "" {
+		rows = append(rows, outputRow{Label: "workspace", Value: cfg.CurrentWorkspace})
+	}
+	if cfg.DatabaseID != "" {
+		rows = append(rows, outputRow{Label: "database", Value: cfg.DatabaseID})
+	}
+	rows = append(rows,
+		outputRow{},
+		outputRow{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws mount "+workspaceHint(cfg.CurrentWorkspace)+" <directory>")},
+	)
+	printSection(markerSuccess+" "+clr(ansiBold, "access token saved"), rows)
 	return nil
 }
 
@@ -470,6 +559,7 @@ func loginUsageText(bin string) string {
   %s auth login [--cloud] [--url <cloud-url>]
   %s auth login --self-hosted [--url <url>]
   %s auth login --control-plane-url <url> --token <token>
+  %s auth login --control-plane-url <url> --access-token <token>
 
 Flags:
   --cloud                   Force cloud mode (browser OAuth)
@@ -477,6 +567,7 @@ Flags:
   --url, --control-plane-url <url>
                             Override control plane URL (default %s for self-managed)
   --token <token>           One-time onboarding token (skips browser)
+  --access-token <token>    Durable CLI access token
   --workspace <name|id>     Preferred workspace for cloud login
 
 Examples:
@@ -484,7 +575,7 @@ Examples:
   %s auth login --self-hosted
   %s auth login --self-hosted --url http://my-host:8091
   %s auth login --cloud
-`, bin, bin, bin, defaultSelfHostedControlPlaneURL, bin, bin, bin, bin)
+`, bin, bin, bin, bin, defaultSelfHostedControlPlaneURL, bin, bin, bin, bin)
 }
 
 func logoutUsageText(bin string) string {

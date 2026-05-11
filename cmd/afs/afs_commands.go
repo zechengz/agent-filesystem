@@ -132,7 +132,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 		return err
 	}
 	if exists && !replaceExisting {
-		return fmt.Errorf("workspace %q already exists; rerun with --force to replace it", workspace)
+		return fmt.Errorf("volume %q already exists; rerun with --force to replace it", workspace)
 	}
 	var preservedVersioningPolicy *controlplane.WorkspaceVersioningPolicy
 	if replaceExisting && exists {
@@ -146,7 +146,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 	lock, err := store.acquireImportLock(ctx, workspace)
 	if err != nil {
 		if errors.Is(err, controlplane.ErrImportInProgress) {
-			return fmt.Errorf("another import is already running for workspace %q; wait for it to finish or clear the stale lock", workspace)
+			return fmt.Errorf("another import is already running for volume %q; wait for it to finish or clear the stale lock", workspace)
 		}
 		return fmt.Errorf("acquire import lock: %w", err)
 	}
@@ -169,7 +169,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 	}
 
 	if replaceExisting {
-		step := startStep("Replacing existing workspace")
+		step := startStep("Replacing existing volume")
 		if err := store.deleteWorkspace(ctx, workspace); err != nil {
 			step.fail(err.Error())
 			return err
@@ -311,7 +311,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 	}
 
 	rows := []outputRow{
-		{Label: "workspace", Value: workspace},
+		{Label: "volume", Value: workspace},
 		{Label: "checkpoint", Value: initialSavepoint},
 		{Label: "files", Value: strconv.Itoa(stats.FileCount)},
 		{Label: "dirs", Value: strconv.Itoa(stats.DirCount)},
@@ -322,9 +322,9 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 		{Label: "import time", Value: formatStepDuration(scanDuration + buildDuration + metadataDuration + rootDuration)},
 	}
 	if !mountAtSource {
-		rows = append(rows, outputRow{Label: "next", Value: filepath.Base(os.Args[0]) + " ws mount " + workspace + " " + shellQuote(sourceDir)})
+		rows = append(rows, outputRow{Label: "next", Value: filepath.Base(os.Args[0]) + " vol mount " + workspace + " " + shellQuote(sourceDir)})
 	}
-	printSection(markerSuccess+" "+clr(ansiBold, "workspace imported"), rows)
+	printSection(markerSuccess+" "+clr(ansiBold, "volume imported"), rows)
 	if mountAtSource {
 		return mountWorkspace(mountOptions{workspace: workspace, directory: sourceDir})
 	}
@@ -344,7 +344,7 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 	if err != nil {
 		return err
 	}
-	database, err := resolveManagedDatabaseForWrite(ctx, cfg, client, explicitDatabase, "workspace import")
+	database, err := resolveManagedDatabaseForWrite(ctx, cfg, client, explicitDatabase, "volume import")
 	if err != nil {
 		return err
 	}
@@ -363,7 +363,7 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 	case err == nil:
 		exists = true
 		if !replaceExisting {
-			return fmt.Errorf("workspace %q already exists; rerun with --force to replace it", workspace)
+			return fmt.Errorf("volume %q already exists; rerun with --force to replace it", workspace)
 		}
 		policy, err := service.GetWorkspaceVersioningPolicy(ctx, workspace)
 		if err != nil {
@@ -389,7 +389,7 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 	}
 
 	if replaceExisting && exists {
-		step := startStep("Replacing existing workspace")
+		step := startStep("Replacing existing volume")
 		if err := service.DeleteWorkspace(ctx, workspace); err != nil && !errors.Is(err, os.ErrNotExist) {
 			step.fail(err.Error())
 			return err
@@ -416,7 +416,7 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 		step.succeed(fmt.Sprintf("%s · %d blobs prepared", formatAFSImportSummary(total), blobCount))
 	}
 
-	step = startStep("Uploading workspace")
+	step = startStep("Uploading volume")
 	response, err := service.ImportWorkspace(ctx, controlplane.ImportWorkspaceRequest{
 		Name:             workspace,
 		Description:      fmt.Sprintf("Imported from %s.", sourceDir),
@@ -435,7 +435,7 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 	step.succeed(response.Workspace.HeadCheckpointID)
 
 	rows := []outputRow{
-		{Label: "workspace", Value: workspace},
+		{Label: "volume", Value: workspace},
 		{Label: "checkpoint", Value: response.Workspace.HeadCheckpointID},
 		{Label: "files", Value: strconv.Itoa(stats.FileCount)},
 		{Label: "dirs", Value: strconv.Itoa(stats.DirCount)},
@@ -446,9 +446,9 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 		{Label: "import time", Value: formatStepDuration(scanDuration + buildDuration + uploadDuration)},
 	}
 	if !mountAtSource {
-		rows = append(rows, outputRow{Label: "next", Value: filepath.Base(os.Args[0]) + " ws mount " + workspace + " " + shellQuote(sourceDir)})
+		rows = append(rows, outputRow{Label: "next", Value: filepath.Base(os.Args[0]) + " vol mount " + workspace + " " + shellQuote(sourceDir)})
 	}
-	printSection(markerSuccess+" "+clr(ansiBold, "workspace imported"), rows)
+	printSection(markerSuccess+" "+clr(ansiBold, "volume imported"), rows)
 	if mountAtSource {
 		return mountWorkspace(mountOptions{workspace: workspace, directory: sourceDir})
 	}
@@ -500,7 +500,7 @@ func prepareAFSImport(sourceDir, workspace string, cfg config, replaceExisting b
 		estimate := estimateAFSImportDuration(total)
 		rows := []outputRow{
 			{Label: "source", Value: sourceDir},
-			{Label: "workspace", Value: workspace},
+			{Label: "volume", Value: workspace},
 			{Label: "scan", Value: formatAFSImportSummary(total)},
 			{Label: "estimate", Value: "~" + formatStepDuration(estimate)},
 		}
@@ -820,7 +820,7 @@ func resolveExplicitWorkspaceSelection(ref string, workspaces []workspaceSummary
 		match.Source = workspaceSelectionExplicit
 		return match, nil
 	}
-	return workspaceSelection{}, fmt.Errorf("workspace %q does not exist", strings.TrimSpace(ref))
+	return workspaceSelection{}, fmt.Errorf("volume %q does not exist", strings.TrimSpace(ref))
 }
 
 func selectedWorkspaceName(cfg config) string {
@@ -1007,14 +1007,14 @@ func workspaceSelectionFromMountRecord(rec mountRecord, workspaces []workspaceSu
 	}
 	match, ok, err := matchWorkspaceSelection(ref, selection.Name, workspaces)
 	if err != nil {
-		return workspaceSelection{}, false, fmt.Errorf("mounted workspace %q is ambiguous: %w\nRun '%s ws list' and pass a workspace id explicitly", selection.Name, err, filepath.Base(os.Args[0]))
+		return workspaceSelection{}, false, fmt.Errorf("mounted volume %q is ambiguous: %w\nRun '%s vol list' and pass a volume id explicitly", selection.Name, err, filepath.Base(os.Args[0]))
 	}
 	if !ok {
 		label := selection.Name
 		if label == "" {
 			label = selection.ID
 		}
-		return workspaceSelection{}, false, fmt.Errorf("mounted workspace %q does not exist; pass a workspace explicitly", label)
+		return workspaceSelection{}, false, fmt.Errorf("mounted volume %q does not exist; pass a volume explicitly", label)
 	}
 	match.Source = source
 	match.MountPath = selection.MountPath
@@ -1035,14 +1035,14 @@ func workspaceSelectionFromActiveState(cfg config, workspaces []workspaceSummary
 	}
 	match, ok, err := matchWorkspaceSelection(ref, active.Name, workspaces)
 	if err != nil {
-		return workspaceSelection{}, false, fmt.Errorf("active workspace %q is ambiguous: %w\nRun '%s ws list' and pass a workspace id explicitly", active.Name, err, filepath.Base(os.Args[0]))
+		return workspaceSelection{}, false, fmt.Errorf("active volume %q is ambiguous: %w\nRun '%s vol list' and pass a volume id explicitly", active.Name, err, filepath.Base(os.Args[0]))
 	}
 	if !ok {
 		label := active.Name
 		if label == "" {
 			label = active.ID
 		}
-		return workspaceSelection{}, false, fmt.Errorf("active workspace %q does not exist; pass a workspace explicitly", label)
+		return workspaceSelection{}, false, fmt.Errorf("active volume %q does not exist; pass a volume explicitly", label)
 	}
 	match.Source = workspaceSelectionActiveState
 	return match, true, nil
@@ -1060,14 +1060,14 @@ func workspaceSelectionFromSavedDefault(cfg config, workspaces []workspaceSummar
 		if label == "" {
 			label = ref
 		}
-		return workspaceSelection{}, false, fmt.Errorf("default workspace %q is ambiguous: %w\nRun '%s ws set-default <workspace-id>'", label, err, filepath.Base(os.Args[0]))
+		return workspaceSelection{}, false, fmt.Errorf("default volume %q is ambiguous: %w\nRun '%s vol set-default <volume-id>'", label, err, filepath.Base(os.Args[0]))
 	}
 	if !ok {
 		label := displayName
 		if label == "" {
 			label = ref
 		}
-		return workspaceSelection{}, false, fmt.Errorf("default workspace %q does not exist; pass a workspace explicitly or run '%s ws unset-default'", label, filepath.Base(os.Args[0]))
+		return workspaceSelection{}, false, fmt.Errorf("default volume %q does not exist; pass a volume explicitly or run '%s vol unset-default'", label, filepath.Base(os.Args[0]))
 	}
 	match.Source = workspaceSelectionSavedDefault
 	return match, true, nil
@@ -1078,10 +1078,10 @@ func workspaceRequiredError(cfg config) error {
 	if err == nil {
 		running := runningMountRecordsForConfig(cfg, reg.Mounts)
 		if len(running) > 1 {
-			return fmt.Errorf("workspace is required; multiple workspaces are mounted\nRun this command inside a mounted workspace, pass a workspace explicitly, or run '%s ws set-default <workspace>'", filepath.Base(os.Args[0]))
+			return fmt.Errorf("volume is required; multiple volumes are mounted\nRun this command inside a mounted volume, pass a volume explicitly, or run '%s vol set-default <volume>'", filepath.Base(os.Args[0]))
 		}
 	}
-	return fmt.Errorf("workspace is required; pass a workspace explicitly or run '%s ws set-default <workspace>'", filepath.Base(os.Args[0]))
+	return fmt.Errorf("volume is required; pass a volume explicitly or run '%s vol set-default <volume>'", filepath.Base(os.Args[0]))
 }
 
 func workspaceSummariesFromMetas(metas []workspaceMeta) []workspaceSummary {
@@ -1105,26 +1105,26 @@ func promptWorkspaceSelectionFromSummaries(workspaces []workspaceSummary) (works
 
 func promptWorkspaceSelectionFromSummariesWithReader(workspaces []workspaceSummary, reader *bufio.Reader) (workspaceSelection, error) {
 	if len(workspaces) == 0 {
-		return workspaceSelection{}, fmt.Errorf("no workspaces found\nCreate one with: %s ws create <workspace>", filepath.Base(os.Args[0]))
+		return workspaceSelection{}, fmt.Errorf("no volumes found\nCreate one with: %s vol create <volume>", filepath.Base(os.Args[0]))
 	}
 
 	fmt.Println()
-	fmt.Println("Select workspace")
+	fmt.Println("Select volume")
 	fmt.Println()
-	headers := []string{"#", "Workspace", "Workspace ID", "Database", "Updated", "Mounted"}
+	headers := []string{"#", "Volume", "Volume ID", "Database", "Updated", "Mounted"}
 	printPlainTable(headers, checkpointWorkspacePromptRows(workspaces, workspaceListMounts(workspaces)))
 	fmt.Println()
-	fmt.Print("Workspace: ")
+	fmt.Print("Volume: ")
 
 	raw, err := reader.ReadString('\n')
 	if err != nil && strings.TrimSpace(raw) == "" {
 		fmt.Println()
-		return workspaceSelection{}, errors.New("workspace selection cancelled")
+		return workspaceSelection{}, errors.New("volume selection cancelled")
 	}
 	choiceText := strings.TrimSpace(raw)
 	if choiceText == "" {
 		fmt.Println()
-		return workspaceSelection{}, errors.New("workspace selection cancelled")
+		return workspaceSelection{}, errors.New("volume selection cancelled")
 	}
 	idx, err := strconv.Atoi(choiceText)
 	if err != nil || idx < 1 || idx > len(workspaces) {

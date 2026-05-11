@@ -202,7 +202,7 @@ const toneStyles = {
   `,
   "git-import": css`
     background: var(--afs-accent-soft);
-    color: #2563eb;
+    color: var(--afs-accent);
   `,
   "cloud-import": css`
     background: var(--afs-bg-soft);
@@ -409,14 +409,25 @@ export const NoticeBody = styled.div`
 `;
 
 export const Tabs = styled.div`
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
-  width: fit-content;
+  align-self: flex-start;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
   padding: 6px;
   border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 14px;
   background: var(--afs-panel, #fafafa);
+  scrollbar-width: thin;
+
+  &::-webkit-scrollbar {
+    height: 6px;
+  }
 
   [data-skin="situation-room"] && {
     border-radius: var(--afs-r-2);
@@ -428,26 +439,36 @@ export const Tabs = styled.div`
 `;
 
 export const TabButton = styled.button<{ $active?: boolean }>`
-  border: none;
-  background: ${({ $active }) => ($active ? "var(--afs-accent-soft, rgba(37, 99, 235, 0.1))" : "transparent")};
-  color: ${({ $active }) => ($active ? "var(--afs-accent, #2563eb)" : "var(--afs-muted, #71717a)")};
+  flex: 0 0 auto;
+  border: 1px solid ${({ $active }) => ($active ? "var(--afs-selection-border)" : "transparent")};
+  background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "transparent")};
+  color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-muted, #71717a)")};
   padding: 9px 16px;
   border-radius: 10px;
   font-size: 13px;
   font-weight: 700;
   line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background 140ms ease, color 140ms ease, transform 140ms ease;
+  box-shadow: ${({ $active }) =>
+    $active ? "inset 0 -2px 0 var(--afs-selection-indicator)" : "none"};
+  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease, color 140ms ease, transform 140ms ease;
 
   &:hover {
-    color: ${({ $active }) => ($active ? "var(--afs-accent, #2563eb)" : "var(--afs-ink, #18181b)")};
+    border-color: ${({ $active }) =>
+      $active
+        ? "var(--afs-selection-border)"
+        : "color-mix(in srgb, var(--afs-selection-border) 44%, transparent)"};
+    color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
+    background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
     transform: translateY(-1px);
   }
 
   [data-skin="situation-room"] && {
+    border-color: ${({ $active }) => ($active ? "var(--afs-selection-border)" : "transparent")};
     border-radius: var(--afs-r-1);
-    background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "transparent")};
-    color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-ink-dim)")};
+    background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "transparent")};
+    color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-ink-dim)")};
     font-weight: var(--afs-fw-regular);
     letter-spacing: var(--afs-tr-caps);
     text-transform: uppercase;
@@ -456,8 +477,12 @@ export const TabButton = styled.button<{ $active?: boolean }>`
 
     &:hover {
       transform: none;
-      color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-ink)")};
-      background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-bg-2)")};
+      border-color: ${({ $active }) =>
+        $active
+          ? "var(--afs-selection-border)"
+          : "color-mix(in srgb, var(--afs-selection-border) 44%, transparent)"};
+      color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
+      background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
     }
   }
 `;
@@ -483,9 +508,10 @@ export const FileButton = styled.button<{ $active?: boolean }>`
   gap: 6px;
   width: 100%;
   border: 1px solid
-    ${({ $active }) => ($active ? "var(--afs-line-strong)" : "var(--afs-line)")};
+    ${({ $active }) => ($active ? "var(--afs-selection-border)" : "var(--afs-line)")};
   background: ${({ $active }) =>
-    $active ? "var(--afs-panel)" : "var(--afs-panel-strong)"};
+    $active ? "var(--afs-selection-bg)" : "var(--afs-panel-strong)"};
+  color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-ink)")};
   border-radius: 18px;
   padding: 13px 14px;
   text-align: left;
@@ -497,19 +523,23 @@ export const FileButton = styled.button<{ $active?: boolean }>`
 
   &:hover {
     transform: translateY(-1px);
-    border-color: var(--afs-line-strong);
+    border-color: var(--afs-selection-border);
+    background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
+    color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
   }
 
   [data-skin="situation-room"] && {
     border-radius: var(--afs-r-2);
-    border-left: 2px solid ${({ $active }) => ($active ? "var(--afs-accent)" : "transparent")};
-    background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-bg-1)")};
-    color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-ink-dim)")};
+    border-color: ${({ $active }) => ($active ? "var(--afs-selection-border)" : "var(--afs-line)")};
+    border-left: var(--afs-selection-indicator-width) solid
+      ${({ $active }) => ($active ? "var(--afs-selection-indicator)" : "transparent")};
+    background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "var(--afs-bg-1)")};
+    color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-ink-dim)")};
 
     &:hover {
       transform: none;
-      background: var(--afs-bg-2);
-      color: var(--afs-ink);
+      background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
+      color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
     }
   }
 `;

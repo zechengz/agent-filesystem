@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -14,17 +15,27 @@ import (
 
 const (
 	cliAccessTokenPrefix = "afs_cli"
+
+	cliScopeAccount         = "account"
+	cliScopeWorkspacePrefix = "workspace:"
+
+	cliCapabilityAccount = "account"
+	cliCapabilityMountRO = "mount-ro"
+	cliCapabilityMountRW = "mount-rw"
 )
 
 var ErrCLIAccessTokenInvalid = errors.New("cli access token is invalid or expired")
 
 type cliAccessTokenRecord struct {
 	ID            string `json:"id"`
+	Name          string `json:"name,omitempty"`
 	OwnerSubject  string `json:"owner_subject,omitempty"`
 	OwnerLabel    string `json:"owner_label,omitempty"`
 	DatabaseID    string `json:"database_id"`
 	WorkspaceID   string `json:"workspace_id"`
 	WorkspaceName string `json:"workspace_name,omitempty"`
+	Scope         string `json:"scope"`
+	Capability    string `json:"capability,omitempty"`
 	SecretHash    string `json:"-"`
 	CreatedAt     string `json:"created_at"`
 	LastUsedAt    string `json:"last_used_at,omitempty"`
@@ -32,29 +43,160 @@ type cliAccessTokenRecord struct {
 	RevokedAt     string `json:"revoked_at,omitempty"`
 }
 
+type cliAccessTokenResponse struct {
+	ID            string `json:"id"`
+	Name          string `json:"name,omitempty"`
+	OwnerSubject  string `json:"owner_subject,omitempty"`
+	OwnerLabel    string `json:"owner_label,omitempty"`
+	DatabaseID    string `json:"database_id,omitempty"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceName string `json:"workspace_name,omitempty"`
+	Scope         string `json:"scope"`
+	Capability    string `json:"capability,omitempty"`
+	Token         string `json:"token,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	LastUsedAt    string `json:"last_used_at,omitempty"`
+	ExpiresAt     string `json:"expires_at,omitempty"`
+	RevokedAt     string `json:"revoked_at,omitempty"`
+}
+
+type createCLIAccessTokenRequest struct {
+	Name       string `json:"name"`
+	Capability string `json:"capability,omitempty"`
+	Readonly   bool   `json:"readonly,omitempty"`
+	ExpiresAt  string `json:"expires_at,omitempty"`
+}
+
+type createCLIAccessTokenOptions struct {
+	Name          string
+	Subject       string
+	Label         string
+	DatabaseID    string
+	WorkspaceID   string
+	WorkspaceName string
+	Scope         string
+	Capability    string
+	ExpiresAt     string
+}
+
 func (m *DatabaseManager) createCLIAccessTokenRecord(ctx context.Context, subject, label, databaseID, workspaceID, workspaceName string) (string, error) {
-	if m == nil || m.catalog == nil {
-		return "", fmt.Errorf("cli token storage is unavailable")
-	}
-	tokenID, secret, err := newCLIAccessTokenParts()
+	response, err := m.createCLIAccessTokenRecordWithOptions(ctx, createCLIAccessTokenOptions{
+		Subject:       subject,
+		Label:         label,
+		DatabaseID:    databaseID,
+		WorkspaceID:   workspaceID,
+		WorkspaceName: workspaceName,
+		Scope:         cliScopeAccount,
+		Capability:    cliCapabilityAccount,
+	})
 	if err != nil {
 		return "", err
 	}
+	return response.Token, nil
+}
+
+func (m *DatabaseManager) CreateResolvedWorkspaceCLIAccessToken(ctx context.Context, workspace string, input createCLIAccessTokenRequest) (cliAccessTokenResponse, error) {
+	if m == nil || m.catalog == nil {
+		return cliAccessTokenResponse{}, fmt.Errorf("cli token storage is unavailable")
+	}
+	subject, label, err := m.requireOwnedSubject(ctx)
+	if err != nil {
+		return cliAccessTokenResponse{}, err
+	}
+	_, profile, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return cliAccessTokenResponse{}, err
+	}
+	if !databaseProfileVisibleToSubject(profile, subject) {
+		return cliAccessTokenResponse{}, os.ErrNotExist
+	}
+	route, err = m.claimSharedWorkspaceForSubject(ctx, profile, route)
+	if err != nil {
+		return cliAccessTokenResponse{}, err
+	}
+	return m.createWorkspaceCLIAccessTokenRecord(ctx, subject, label, profile.ID, route.WorkspaceID, route.Name, input)
+}
+
+func (m *DatabaseManager) CreateWorkspaceCLIAccessToken(ctx context.Context, databaseID, workspace string, input createCLIAccessTokenRequest) (cliAccessTokenResponse, error) {
+	if m == nil || m.catalog == nil {
+		return cliAccessTokenResponse{}, fmt.Errorf("cli token storage is unavailable")
+	}
+	subject, label, err := m.requireOwnedSubject(ctx)
+	if err != nil {
+		return cliAccessTokenResponse{}, err
+	}
+	_, profile, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return cliAccessTokenResponse{}, err
+	}
+	if !databaseProfileVisibleToSubject(profile, subject) {
+		return cliAccessTokenResponse{}, os.ErrNotExist
+	}
+	route, err = m.claimSharedWorkspaceForSubject(ctx, profile, route)
+	if err != nil {
+		return cliAccessTokenResponse{}, err
+	}
+	return m.createWorkspaceCLIAccessTokenRecord(ctx, subject, label, profile.ID, route.WorkspaceID, route.Name, input)
+}
+
+func (m *DatabaseManager) createWorkspaceCLIAccessTokenRecord(ctx context.Context, subject, label, databaseID, workspaceID, workspaceName string, input createCLIAccessTokenRequest) (cliAccessTokenResponse, error) {
+	capabilityInput := strings.TrimSpace(input.Capability)
+	if capabilityInput == "" && input.Readonly {
+		capabilityInput = cliCapabilityMountRO
+	}
+	capability, err := normalizeCLIMountCapability(capabilityInput)
+	if err != nil {
+		return cliAccessTokenResponse{}, err
+	}
+	return m.createCLIAccessTokenRecordWithOptions(ctx, createCLIAccessTokenOptions{
+		Name:          input.Name,
+		Subject:       subject,
+		Label:         label,
+		DatabaseID:    databaseID,
+		WorkspaceID:   workspaceID,
+		WorkspaceName: workspaceName,
+		Scope:         cliWorkspaceScope(workspaceID),
+		Capability:    capability,
+		ExpiresAt:     input.ExpiresAt,
+	})
+}
+
+func (m *DatabaseManager) createCLIAccessTokenRecordWithOptions(ctx context.Context, options createCLIAccessTokenOptions) (cliAccessTokenResponse, error) {
+	if m == nil || m.catalog == nil {
+		return cliAccessTokenResponse{}, fmt.Errorf("cli token storage is unavailable")
+	}
+	tokenID, secret, err := newCLIAccessTokenParts()
+	if err != nil {
+		return cliAccessTokenResponse{}, err
+	}
 	now := time.Now().UTC()
+	scope := normalizeCLITokenScope(options.Scope)
+	capability := normalizeCLITokenCapability(scope, options.Capability)
 	record := cliAccessTokenRecord{
 		ID:            tokenID,
-		OwnerSubject:  strings.TrimSpace(subject),
-		OwnerLabel:    strings.TrimSpace(label),
-		DatabaseID:    strings.TrimSpace(databaseID),
-		WorkspaceID:   strings.TrimSpace(workspaceID),
-		WorkspaceName: strings.TrimSpace(workspaceName),
+		Name:          strings.TrimSpace(options.Name),
+		OwnerSubject:  strings.TrimSpace(options.Subject),
+		OwnerLabel:    strings.TrimSpace(options.Label),
+		DatabaseID:    strings.TrimSpace(options.DatabaseID),
+		WorkspaceID:   strings.TrimSpace(options.WorkspaceID),
+		WorkspaceName: strings.TrimSpace(options.WorkspaceName),
+		Scope:         scope,
+		Capability:    capability,
 		SecretHash:    hashCLIAccessTokenSecret(secret),
 		CreatedAt:     now.Format(timeRFC3339),
 	}
-	if err := m.catalog.CreateCLIAccessToken(ctx, record); err != nil {
-		return "", err
+	if expiresAt := strings.TrimSpace(options.ExpiresAt); expiresAt != "" {
+		if _, err := time.Parse(timeRFC3339, expiresAt); err != nil {
+			return cliAccessTokenResponse{}, fmt.Errorf("expires_at must be RFC3339: %w", err)
+		}
+		record.ExpiresAt = expiresAt
 	}
-	return formatCLIAccessToken(tokenID, secret), nil
+	if err := m.catalog.CreateCLIAccessToken(ctx, record); err != nil {
+		return cliAccessTokenResponse{}, err
+	}
+	response := cliAccessTokenResponseFromRecord(record)
+	response.Token = formatCLIAccessToken(tokenID, secret)
+	return response, nil
 }
 
 func (m *DatabaseManager) AuthenticateCLIAccessToken(ctx context.Context, rawToken string) (cliAccessTokenRecord, error) {
@@ -89,6 +231,8 @@ func (m *DatabaseManager) AuthenticateCLIAccessToken(ctx context.Context, rawTok
 		return cliAccessTokenRecord{}, err
 	}
 	record.LastUsedAt = now.Format(timeRFC3339)
+	record.Scope = normalizeCLITokenScope(record.Scope)
+	record.Capability = normalizeCLITokenCapability(record.Scope, record.Capability)
 	return record, nil
 }
 
@@ -123,4 +267,162 @@ func parseCLIAccessToken(raw string) (string, string, error) {
 func hashCLIAccessTokenSecret(secret string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(secret)))
 	return hex.EncodeToString(sum[:])
+}
+
+func cliWorkspaceScope(workspaceID string) string {
+	return cliScopeWorkspacePrefix + strings.TrimSpace(workspaceID)
+}
+
+func normalizeCLIMountCapability(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "rw", "write", "read-write", cliCapabilityMountRW:
+		return cliCapabilityMountRW, nil
+	case "ro", "read", "read-only", "readonly", cliCapabilityMountRO:
+		return cliCapabilityMountRO, nil
+	default:
+		return "", fmt.Errorf("unsupported cli token capability %q (expected mount-ro or mount-rw)", raw)
+	}
+}
+
+func normalizeCLITokenScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return cliScopeAccount
+	}
+	return scope
+}
+
+func normalizeCLITokenCapability(scope, capability string) string {
+	capability = strings.ToLower(strings.TrimSpace(capability))
+	switch capability {
+	case "":
+		if isAccountCLIScope(scope) {
+			return cliCapabilityAccount
+		}
+		return cliCapabilityMountRW
+	case "rw", "write", "read-write":
+		return cliCapabilityMountRW
+	case "ro", "read", "read-only", "readonly":
+		return cliCapabilityMountRO
+	default:
+		return capability
+	}
+}
+
+func isAccountCLIScope(scope string) bool {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "", cliScopeAccount, "org", "organization":
+		return true
+	default:
+		return false
+	}
+}
+
+func isWorkspaceCLIScope(scope string) bool {
+	return strings.HasPrefix(strings.TrimSpace(scope), cliScopeWorkspacePrefix)
+}
+
+func isMountOnlyCLICapability(capability string) bool {
+	switch normalizeCLITokenCapability(cliWorkspaceScope("workspace"), capability) {
+	case cliCapabilityMountRO, cliCapabilityMountRW:
+		return true
+	default:
+		return false
+	}
+}
+
+func cliCapabilityReadonly(capability string) bool {
+	return normalizeCLITokenCapability(cliWorkspaceScope("workspace"), capability) == cliCapabilityMountRO
+}
+
+func cliAccessTokenResponseFromRecord(record cliAccessTokenRecord) cliAccessTokenResponse {
+	scope := normalizeCLITokenScope(record.Scope)
+	return cliAccessTokenResponse{
+		ID:            record.ID,
+		Name:          record.Name,
+		OwnerSubject:  record.OwnerSubject,
+		OwnerLabel:    record.OwnerLabel,
+		DatabaseID:    record.DatabaseID,
+		WorkspaceID:   record.WorkspaceID,
+		WorkspaceName: record.WorkspaceName,
+		Scope:         scope,
+		Capability:    normalizeCLITokenCapability(scope, record.Capability),
+		CreatedAt:     record.CreatedAt,
+		LastUsedAt:    record.LastUsedAt,
+		ExpiresAt:     record.ExpiresAt,
+		RevokedAt:     record.RevokedAt,
+	}
+}
+
+func cliTokenAllowsHTTPPath(identity AuthIdentity, method, path string) bool {
+	if strings.TrimSpace(identity.Provider) != "cli-token" {
+		return true
+	}
+	if !isWorkspaceCLIScope(identity.Scope) || !isMountOnlyCLICapability(identity.Capability) {
+		return true
+	}
+	path = strings.TrimSpace(path)
+	if method == http.MethodGet && path == "/v1/workspaces" {
+		return true
+	}
+	return strings.HasPrefix(path, "/v1/client/") ||
+		strings.HasPrefix(path, "/workspaces/") ||
+		strings.HasPrefix(path, "/databases/")
+}
+
+func cliTokenAllowsWorkspace(identity AuthIdentity, databaseID, workspaceID, workspaceName string) bool {
+	if strings.TrimSpace(identity.Provider) != "cli-token" {
+		return true
+	}
+	scope := normalizeCLITokenScope(identity.Scope)
+	if isAccountCLIScope(scope) {
+		return true
+	}
+	if !isWorkspaceCLIScope(scope) {
+		return false
+	}
+	if scopedDatabase := strings.TrimSpace(identity.ScopedDatabaseID); scopedDatabase != "" && scopedDatabase != strings.TrimSpace(databaseID) {
+		return false
+	}
+	target := strings.TrimSpace(strings.TrimPrefix(scope, cliScopeWorkspacePrefix))
+	if target == "" {
+		return false
+	}
+	return target == strings.TrimSpace(workspaceID) || target == strings.TrimSpace(workspaceName)
+}
+
+func requireCLITokenWorkspaceAccess(ctx context.Context, databaseID, workspaceID, workspaceName string) error {
+	identity, ok := AuthIdentityFromContext(ctx)
+	if !ok || cliTokenAllowsWorkspace(identity, databaseID, workspaceID, workspaceName) {
+		return nil
+	}
+	return os.ErrNotExist
+}
+
+func filterWorkspaceSummariesForCLIToken(ctx context.Context, items []workspaceSummary) []workspaceSummary {
+	identity, ok := AuthIdentityFromContext(ctx)
+	if !ok || strings.TrimSpace(identity.Provider) != "cli-token" || !isWorkspaceCLIScope(identity.Scope) {
+		return items
+	}
+	filtered := make([]workspaceSummary, 0, len(items))
+	for _, item := range items {
+		if cliTokenAllowsWorkspace(identity, item.DatabaseID, item.ID, item.Name) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func applyCLITokenSessionPolicy(ctx context.Context, route workspaceCatalogRoute, input createWorkspaceSessionRequest) (createWorkspaceSessionRequest, error) {
+	identity, ok := AuthIdentityFromContext(ctx)
+	if !ok || strings.TrimSpace(identity.Provider) != "cli-token" {
+		return input, nil
+	}
+	if !cliTokenAllowsWorkspace(identity, route.DatabaseID, route.WorkspaceID, route.Name) {
+		return input, os.ErrNotExist
+	}
+	if cliCapabilityReadonly(identity.Capability) {
+		input.Readonly = true
+	}
+	return input, nil
 }

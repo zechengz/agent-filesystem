@@ -85,8 +85,8 @@ function ActivityPage() {
     }
 
     void navigate({
-      to: "/workspaces/$workspaceId",
-      params: { workspaceId: event.workspaceId },
+      to: "/volumes/$volumeId",
+      params: { volumeId: event.workspaceId },
       search: {
         ...(event.databaseId ? { databaseId: event.databaseId } : {}),
         ...(event.kind === "checkpoint"
@@ -104,8 +104,8 @@ function ActivityPage() {
     }
 
     void navigate({
-      to: "/workspaces/$workspaceId",
-      params: { workspaceId: entry.workspaceId },
+      to: "/volumes/$volumeId",
+      params: { volumeId: entry.workspaceId },
       search: {
         ...(entry.databaseId ? { databaseId: entry.databaseId } : {}),
         tab: "changes",

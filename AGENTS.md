@@ -171,6 +171,33 @@ The most important implementation seams are:
 - Search/BM25 promotion in the Cloud UI should stay restrained and
   operational: prefer compact status text in existing workspace and monitor
   surfaces over extra badge rows or standalone promo cards.
+- New UI pages must start from existing Redis UI controls and local shared
+  components such as `Button`, `Table`, `Menu`, `TableHeading.SearchInput`, and
+  `ui/src/foundation/tables/workspace-table.styles.ts`. Do not invent bespoke
+  cards, inputs, rows, or CSS unless the needed component does not already exist
+  in the project.
+- Agent-profile editing should use full pages with a breadcrumb back to the
+  list, not drawer-based flows, while preserving the same Filesystem / Tokens /
+  Settings structure.
+- The `/workspaces` UI is "Agent Workspaces" in page copy. On the list, the
+  mounted storage column is "Volumes" and counts should say volume/volumes, not
+  workspace/workspaces. Agent rows should use the agent/Bot icon with the
+  neutral table icon treatment, not colored avatars or letter-only avatars.
+- Agent Workspace editor pages should use standard input components and compact
+  table-like summaries. Avoid prototype-only borderless inputs, big metric
+  cards, and explanatory workspace cards in this flow.
+- Mounted folder rows in the Agent Workspace editor should read as filesystem
+  children under `/`, with indentation and connector lines from the root row.
+- Agent Workspace editor pages should keep the editable content, tabs, body,
+  and footer inside one main card below the breadcrumb.
+- The Agent Workspace filesystem action is "Add Volume". It opens a multi-select
+  wizard for existing volumes plus permissions, not an immediate "Add shared
+  folder" shortcut.
+- The Agent Workspace filesystem section should present a left-aligned
+  "Volumes" section title with the "Add Volume" action aligned to the right,
+  matching other table/action headers.
+- Volume/detail tab bars must stay inside their card. Use short tab labels and
+  horizontal tab scrolling instead of allowing tab controls to overflow or wrap.
 - Tenant-scoped client routes must run through the same auth middleware as admin
   routes before they resolve workspace names. Otherwise bearer tokens do not
   attach an auth subject and duplicate workspace-name errors can expose
@@ -259,6 +286,8 @@ The most important implementation seams are:
   supports `lex:`, `vec:`, `hyde:`, and `intent:` documents, and uses
   `--keyword` / `--semantic` for narrower modes. Do not reintroduce public
   `search` or `vsearch` commands unless the product direction changes again.
+- On the Volume details page, the merged file/lifecycle timeline is titled
+  `History`. Do not expose `Changelog` as a peer tab or section title there.
 - Semantic query embeddings must use a real provider. QMD uses a local GGUF
   embedding model with explicit query/document formatting; deterministic hash
   embeddings are acceptable only as test doubles, never as product behavior.
@@ -289,5 +318,24 @@ The most important implementation seams are:
 - Workspace file/query CLI calls use resolved workspace routes under
   `/v1/workspaces/<id>/...`; when adding a scoped database route, add the
   matching resolved route and a regression test for workspace IDs.
+- `afs ws mount <workspace>` must resolve the Agent Workspace manifest before
+  prompting for a local folder. Missing manifests should produce an Agent
+  Workspace error with `afs ws list`/`afs ws create` guidance, not a bare
+  file-not-found error.
+- Root `afs mount` and `afs unmount` are Agent Workspace shortcuts. They should
+  behave like `afs ws mount`/`afs ws unmount`, including no-arg prompts that
+  list Agent Workspaces, not raw volumes. Direct volume mounting remains under
+  `afs vol mount`/`afs vol unmount`.
+- `afs ws mount` should print one Agent Workspace summary. Suppress child
+  `Volume mounted` sections from the underlying per-volume mounts and show the
+  actual local mounted volume paths with read-only/read-write permissions and
+  file counts. Do not display logical `/workspace/volume` paths as if they are
+  filesystem roots.
+- The root `afs help` screen should stay concise. Do not reintroduce a
+  `Common Flows` section there.
+- `afs status` must aggregate child volume mount records tagged with
+  `agent_workspace_root` into one mounted Agent Workspace row. Do not list those
+  child volumes under Mounted workspaces; direct volume mounts belong in a
+  separate Mounted volumes section.
 - Do not restart the user's running control plane automatically. Rebuild
   binaries when needed, but let the user restart `afs-control-plane`.

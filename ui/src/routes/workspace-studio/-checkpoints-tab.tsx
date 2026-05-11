@@ -689,8 +689,8 @@ function CheckpointDiffDialog({
   const title = mode === "restore" ? `Restore ${savepoint.name}` : `Compare ${savepoint.name}`;
   const body =
     mode === "restore"
-      ? "Review how the active workspace will change before restoring this checkpoint."
-      : "Review what changed between this checkpoint and the active workspace.";
+      ? "Review how the active volume will change before restoring this checkpoint."
+      : "Review what changed between this checkpoint and the active volume.";
 
   return (
     <DialogOverlay onClick={onClose}>
@@ -840,7 +840,7 @@ function InlineTextDiff({ entry }: { entry: AFSDiffEntry }) {
 }
 
 function viewLabel(workspace: AFSWorkspaceDetail, view: AFSWorkspaceView) {
-  if (view === "working-copy" || view === "head") return "Active workspace";
+  if (view === "working-copy" || view === "head") return "Active volume";
   const checkpointId = view.replace(/^checkpoint:/, "");
   const savepoint = workspace.savepoints.find((item) => item.id === checkpointId);
   return savepoint ? `Checkpoint ${savepoint.name}` : `Checkpoint ${checkpointId}`;
@@ -1205,7 +1205,7 @@ const DiffRow = styled.div`
 
 const opTone = {
   create: "#15803d",
-  update: "#2563eb",
+  update: "var(--afs-accent)",
   delete: "#b91c1c",
   rename: "#7c3aed",
   metadata: "#64748b",

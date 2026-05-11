@@ -1,9 +1,9 @@
 # Volume + Workspace User Surfaces
 
-Status: draft
+Status: implementation pass landed
 Owner: rowan
 Created: 2026-05-08
-Updated: 2026-05-08
+Updated: 2026-05-09
 
 Pair plan: [`volume-workspace-model.md`](volume-workspace-model.md) (data
 model substrate). This plan covers the user-facing rollout: CLI commands,
@@ -223,42 +223,44 @@ Non-exhaustive; final list driven by build failures during the change.
 
 ### Phase 1 — Volume rename (3–4 days)
 
-- [ ] Rename `/workspaces` route to `/volumes`; rename component files
-- [ ] Update sidebar nav label "Workspaces" → "Volumes" (temporarily —
+- [x] Rename `/workspaces` route to `/volumes`; rename component files
+- [x] Update sidebar nav label "Workspaces" → "Volumes" (temporarily —
       Phase 2 reorders)
-- [ ] Update copy on volume detail and list pages
-- [ ] CLI: `afs vol` command tree (parallel to existing `afs ws` until
+- [x] Update copy on volume detail and list pages
+- [x] CLI: `afs vol` command tree (parallel to existing `afs ws` until
       Phase 3 cuts over)
-- [ ] `--volume` flag added to `cp`, `fs`, `mcp`; `--workspace` retained
+- [x] `--volume` flag added to `cp`, `fs`, `mcp`; `--workspace` retained
       temporarily
 
 ### Phase 2 — Workspace composition pages (5–7 days)
 
-- [ ] New `/workspaces` route serving the composition list (replaces old
+- [x] New `/workspaces` route serving the composition list (replaces old
       `/agents` content as repurposed page)
 - [ ] Workspace detail with manifest editor (add/remove/reorder volumes,
       readonly toggle)
-- [ ] Bookmarks tab on workspace detail
+- [x] Workspace detail manifest viewer
+- [x] Bookmarks section on workspace detail
 - [ ] Cross-owner mount UI (paste volume token)
-- [ ] Token creation flow updated for (scope, capability) in MCP page
-- [ ] Sidebar nav reorder: Monitor → Workspaces → Volumes → MCP →
+- [x] Token creation flow updated for (scope, capability) in MCP page
+- [x] Sidebar nav reorder: Monitor → Workspaces → Volumes → MCP →
       Databases → History → Admin
-- [ ] One-time banner on `/workspaces` for migrating users
+- [x] Reorientation notice on `/workspaces` for migrating users
 
 ### Phase 3 — Monitor refactor (2–3 days)
 
-- [ ] Move Live Topology card to Monitor
+- [x] Move Live Topology card to Monitor
 - [ ] Move connection history to Monitor
-- [ ] Remove `/agents` route; add 301 redirects from `/agents` and
-      `/agents/{id}` to `/workspaces` and `/workspaces/{id}`
+- [x] Remove `/agents` page content; add app-level redirect from `/agents`
+      to Monitor
 
 ### Phase 4 — CLI cutover (3–4 days)
 
-- [ ] `afs ws` command tree replaced with composition semantics
-- [ ] Migration-error path on legacy `afs ws create <name>` invocations
-- [ ] `afs daemon status`, `afs daemon stop` exposed
+- [x] `afs ws` command tree replaced with composition semantics
+- [x] Migration-error path on legacy `afs ws` file-tree subcommands
+- [x] `afs ws` composition manifest subcommands exposed
+- [x] `afs daemon status`, `afs daemon stop` exposed
 - [ ] Deprecate `--workspace` flag on volume-targeting commands; warn-once
-- [ ] Update integration tests
+- [x] Update CLI integration tests
 
 ### Phase 5 — Docs and templates (3 days)
 
@@ -273,8 +275,9 @@ Non-exhaustive; final list driven by build failures during the change.
 ### Phase 6 — Verification (2 days)
 
 - [ ] `make build` and `make lint` pass
-- [ ] UI dev server starts; renamed routes render; redirects work; no
-      console errors
+- [x] `cd ui && npm run build` passes
+- [x] `go test ./cmd/afs ./internal/controlplane` passes
+- [x] UI dev server starts; renamed routes render; redirect smoke test passes
 - [ ] Round-trip: create workspace → add ro volume + rw volume → mount via
       CLI → confirm read/write enforcement → bookmark → restore
 - [ ] Token round-trip: workspace `rw-checkpoint` token → mount, write,
@@ -306,3 +309,59 @@ Non-exhaustive; final list driven by build failures during the change.
   "create your first workspace (composition)"? Recommend the former —
   volume is the simpler atomic unit, composition can come later in their
   journey.
+
+## Implementation Review — 2026-05-09
+
+Landed a compatibility-first user-surface pass:
+
+- Added `afs vol` as the explicit content-tree command family and added
+  `--volume` to `afs fs`, `afs cp`, and `afs mcp`.
+- Added `afs daemon status` and `afs daemon stop`.
+- Added workspace-manifest CLI subcommands:
+  `create-manifest`, `list-manifests`, `show-manifest`, `mount-volume`,
+  `unmount-volume`, `bookmark`, and `restore-bookmark`.
+- Split the UI into `/workspaces` for composition manifests and `/volumes`
+  for the existing file studio, with generated route tree updates.
+- Moved Live Topology onto Monitor and turned `/agents` into a redirect.
+- Updated MCP token creation/display to show volume scope and capability.
+
+Still remaining:
+
+- Detail-page manifest editing UI is read-only in this pass; CLI/API can add
+  and remove mounts.
+- Full docs/template vocabulary migration remains open.
+
+## Implementation Review — 2026-05-10
+
+Finished the CLI cutover:
+
+- `afs ws create/list/show/add/remove/mount/unmount/bookmark` now targets Agent
+  Workspace composition manifests.
+- Legacy file-tree operations moved behind `afs vol`, and root shortcuts such
+  as `afs mount`, `afs list`, and `afs import` now dispatch through `afs vol`.
+- `afs vol list` lists volumes; `afs ws list` lists Agent Workspaces only.
+- Mount/setup/status/auth/config copy now points users at `afs vol mount` for
+  direct content-tree mounts.
+- Added CLI coverage proving `afs ws list` does not show raw volume rows.
+- Fixed `afs ws mount <workspace>` so it resolves the Agent Workspace manifest
+  before prompting for a local folder and accepts the default `~/workspace`
+  root for mounted volumes.
+- Corrected root `afs mount` and `afs unmount` so they target Agent Workspace
+  manifests. Direct single-volume lifecycle remains under `afs vol mount` and
+  `afs vol unmount`.
+- Added mount-registry metadata for Agent Workspace mounts so no-arg
+  `afs unmount` can list mounted Agent Workspaces instead of raw volume rows.
+- Follow-up fix: `afs status` now aggregates child volume mount records into a
+  single Mounted workspaces row and keeps direct volume mounts in a separate
+  Mounted volumes section. Agent Workspace unmount now removes all grouped child
+  mounts with one workspace-level result instead of printing per-volume
+  unmounts.
+
+Verification:
+
+- `go test ./cmd/afs`
+- `go test ./cmd/afs -run 'TestCmdStatusAggregates|TestCmdStatusVerboseKeepsSingleVolumeWorkspaceGrouped|TestCmdStatusPrintsAlignedMountTable|TestCmdStatusDoesNotListStoppedRecordsAsMounted|TestCmdStatusVerboseIncludesConnectionDetails|TestRootUnmountByAgentWorkspace|TestRootUnmountPrompts|TestRootMountPrompts'`
+- `go test ./cmd/afs -run 'TestWorkspace(Mount|CommandsManage)'`
+- `go test ./cmd/afs -run 'Test(Root|VolumeRootShortcuts|WorkspaceMount|WorkspaceCommandsManage)'`
+- `go test ./internal/controlplane -run TestHTTPV2VolumesAndWorkspaceCompositions`
+- `make commands`

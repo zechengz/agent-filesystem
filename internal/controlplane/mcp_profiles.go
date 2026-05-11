@@ -13,6 +13,13 @@ const (
 	MCPProfileAdminRW               = "admin-rw"
 )
 
+const (
+	MCPCapabilityRO           = "ro"
+	MCPCapabilityRW           = "rw"
+	MCPCapabilityRWCheckpoint = "rw-checkpoint"
+	MCPCapabilityAdmin        = "admin"
+)
+
 var (
 	workspaceReadTools = map[string]struct{}{
 		"file_read":                       {},
@@ -64,6 +71,61 @@ func NormalizeMCPProfile(raw string) (string, error) {
 		return profile, nil
 	default:
 		return "", fmt.Errorf("unsupported mcp profile %q", raw)
+	}
+}
+
+func NormalizeMCPCapability(raw string) (string, error) {
+	capability := strings.TrimSpace(strings.ToLower(raw))
+	if capability == "" {
+		return MCPCapabilityRW, nil
+	}
+	switch capability {
+	case MCPCapabilityRO, MCPCapabilityRW, MCPCapabilityRWCheckpoint, MCPCapabilityAdmin:
+		return capability, nil
+	default:
+		return "", fmt.Errorf("unsupported mcp capability %q", raw)
+	}
+}
+
+func MCPCapabilityFromProfile(profile string) string {
+	normalizedProfile, err := NormalizeMCPProfile(profile)
+	if err != nil {
+		return MCPCapabilityRW
+	}
+	switch normalizedProfile {
+	case MCPProfileWorkspaceRO, MCPProfileAdminRO:
+		return MCPCapabilityRO
+	case MCPProfileWorkspaceRW:
+		return MCPCapabilityRW
+	case MCPProfileWorkspaceRWCheckpoint:
+		return MCPCapabilityRWCheckpoint
+	case MCPProfileAdminRW:
+		return MCPCapabilityAdmin
+	default:
+		return MCPCapabilityRW
+	}
+}
+
+func MCPProfileFromCapability(scope, capability string) string {
+	normalizedCapability, err := NormalizeMCPCapability(capability)
+	if err != nil {
+		normalizedCapability = MCPCapabilityRW
+	}
+	if isControlPlaneScope(scope) {
+		switch normalizedCapability {
+		case MCPCapabilityRO:
+			return MCPProfileAdminRO
+		default:
+			return MCPProfileAdminRW
+		}
+	}
+	switch normalizedCapability {
+	case MCPCapabilityRO:
+		return MCPProfileWorkspaceRO
+	case MCPCapabilityRWCheckpoint, MCPCapabilityAdmin:
+		return MCPProfileWorkspaceRWCheckpoint
+	default:
+		return MCPProfileWorkspaceRW
 	}
 }
 

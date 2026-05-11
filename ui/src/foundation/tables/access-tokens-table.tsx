@@ -52,6 +52,45 @@ function formatProfile(profile: AFSMCPProfile) {
   }
 }
 
+function formatCapability(capability?: string, profile?: AFSMCPProfile) {
+  switch (capability) {
+    case "ro":
+      return "Read only";
+    case "rw":
+      return "Read / write";
+    case "rw-checkpoint":
+      return "Read / write + checkpoints";
+    case "admin":
+      return "Admin";
+    default:
+      return profile ? formatProfile(profile) : "Default";
+  }
+}
+
+function tokenScopeKind(token: AFSMCPToken) {
+  const scope = token.scope?.trim() ?? "";
+  if (isControlPlaneScope(scope)) return "control-plane";
+  if (scope.startsWith("volume:")) return "volume";
+  if (scope.startsWith("workspace:")) return "workspace";
+  if (scope.startsWith("database:")) return "database";
+  return token.workspaceId ? "volume" : "unknown";
+}
+
+function formatScopeKind(scopeKind: string) {
+  switch (scopeKind) {
+    case "control-plane":
+      return "Control plane";
+    case "volume":
+      return "Volume";
+    case "workspace":
+      return "Workspace";
+    case "database":
+      return "Database";
+    default:
+      return "Scoped";
+  }
+}
+
 function formatTimestamp(value?: string) {
   if (!value) return "Never";
   const date = new Date(value);
@@ -107,6 +146,7 @@ function AccessTokenDetailDialog({
 }) {
   const [copied, setCopied] = useState(false);
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
+  const scopeKind = tokenScopeKind(token);
   const workspaceName =
     token.workspaceName || workspaceNameById?.get(token.workspaceId) || token.workspaceId;
   const configSnippet = buildHostedAccessConfig(workspaceName);
@@ -130,7 +170,7 @@ function AccessTokenDetailDialog({
             <div>
               <DialogTitle>{token.name?.trim() || "Access token"}</DialogTitle>
               <DialogBody>
-                Access token for workspace <strong>{workspaceName}</strong>.
+                Access token for <strong>{workspaceName}</strong>.
               </DialogBody>
             </div>
             <DialogCloseButton onClick={onClose}>&times;</DialogCloseButton>
@@ -144,11 +184,15 @@ function AccessTokenDetailDialog({
               </DetailValue>
             </DetailField>
             <DetailField>
-              <DetailLabel>Profile</DetailLabel>
-              <DetailValue>{formatProfile(token.profile)}</DetailValue>
+              <DetailLabel>Scope</DetailLabel>
+              <DetailValue>{formatScopeKind(scopeKind)}</DetailValue>
             </DetailField>
             <DetailField>
-              <DetailLabel>Workspace</DetailLabel>
+              <DetailLabel>Capability</DetailLabel>
+              <DetailValue>{formatCapability(token.capability, token.profile)}</DetailValue>
+            </DetailField>
+            <DetailField>
+              <DetailLabel>Target</DetailLabel>
               <DetailValue>{workspaceName}</DetailValue>
             </DetailField>
             <DetailField>
@@ -170,8 +214,8 @@ function AccessTokenDetailDialog({
               <DetailValue>{token.expiresAt ? formatTimestamp(token.expiresAt) : "Never"}</DetailValue>
             </DetailField>
             <DetailField>
-              <DetailLabel>Access</DetailLabel>
-              <DetailValue>{token.readonly ? "Read only" : "Read / write"}</DetailValue>
+              <DetailLabel>Profile</DetailLabel>
+              <DetailValue>{formatProfile(token.profile)}</DetailValue>
             </DetailField>
           </DetailGrid>
 
@@ -307,6 +351,8 @@ export function AccessTokensTable({
               row.workspaceId,
               row.databaseId,
               row.profile,
+              row.capability ?? "",
+              row.scope ?? "",
             ].some((value) => value.toLowerCase().includes(query)),
           );
 
@@ -378,6 +424,7 @@ export function AccessTokensTable({
             if (isControlPlaneScope(row.original.scope)) {
               return <ScopeBadge $tone="control">Control plane</ScopeBadge>;
             }
+            const scopeKind = tokenScopeKind(row.original);
             const name =
               row.original.workspaceName
               || workspaceNameById?.get(row.original.workspaceId)
@@ -386,11 +433,22 @@ export function AccessTokensTable({
             return (
               <ScopeCell>
                 <ScopeBadge $tone="workspace" title={db ? `Database: ${db}` : undefined}>
-                  Workspace: {name}
+                  {formatScopeKind(scopeKind)}: {name}
                 </ScopeBadge>
               </ScopeCell>
             );
           },
+        },
+        {
+          accessorKey: "capability",
+          header: "Capability",
+          size: 150,
+          enableSorting: false,
+          cell: ({ row }) => (
+            <Typography.Body component="span">
+              {formatCapability(row.original.capability, row.original.profile)}
+            </Typography.Body>
+          ),
         },
         {
           accessorKey: "lastUsedAt",

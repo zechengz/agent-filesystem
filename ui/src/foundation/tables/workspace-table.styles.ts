@@ -35,7 +35,8 @@ export const TableViewport = styled.div`
   }
 
   tbody tr:hover {
-    background: var(--afs-panel);
+    background: var(--afs-selection-hover-bg);
+    color: var(--afs-selection-hover-ink);
   }
 `;
 
@@ -54,12 +55,13 @@ export const DenseTableViewport = styled(TableViewport)`
     padding-top: 10px !important;
     padding-bottom: 10px !important;
     vertical-align: middle;
+    font-size: 15px;
   }
 
   thead th {
     padding-top: 10px !important;
     padding-bottom: 10px !important;
-    font-size: 10.5px;
+    font-size: 13px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--afs-muted, #71717a);
@@ -104,7 +106,7 @@ export const SingleLineText = styled.span`
 
 export const StatusCaption = styled.span`
   color: var(--afs-muted);
-  font-size: 12px;
+  font-size: 14px;
 `;
 
 export const ActionRow = styled.div`
@@ -118,6 +120,11 @@ export const CountCell = styled.div`
   display: flex;
   align-items: center;
   gap: 6px;
+  font-size: 15px;
+
+  span {
+    font-size: inherit;
+  }
 `;
 
 export const MetaBadge = styled.span`
@@ -240,19 +247,25 @@ export const ToggleGroup = styled.div`
 `;
 
 export const ToggleButton = styled.button<{ $active: boolean }>`
-  border: none;
+  border: 1px solid ${({ $active }) => ($active ? "var(--afs-selection-border)" : "transparent")};
   border-radius: 7px;
   padding: 6px 14px;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  color: ${({ $active }) => ($active ? "var(--afs-accent, #2563eb)" : "var(--afs-muted, #71717a)")};
-  background: ${({ $active }) => ($active ? "var(--afs-accent-soft, rgba(37, 99, 235, 0.1))" : "transparent")};
-  transition: background 160ms ease, color 160ms ease;
+  color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-muted, #71717a)")};
+  background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "transparent")};
+  box-shadow: ${({ $active }) =>
+    $active ? "inset 0 -2px 0 var(--afs-selection-indicator)" : "none"};
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
 
   &:hover {
-    color: ${({ $active }) => ($active ? "var(--afs-accent, #2563eb)" : "var(--afs-ink, #18181b)")};
-    background: ${({ $active }) => ($active ? "var(--afs-accent-soft, rgba(37, 99, 235, 0.1))" : "var(--afs-focus-soft, #f0f0f0)")};
+    border-color: ${({ $active }) =>
+      $active
+        ? "var(--afs-selection-border)"
+        : "color-mix(in srgb, var(--afs-selection-border) 44%, transparent)"};
+    color: ${({ $active }) => ($active ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
+    background: ${({ $active }) => ($active ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
   }
 
   &:focus-visible {

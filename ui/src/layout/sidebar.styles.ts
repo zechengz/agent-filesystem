@@ -14,6 +14,27 @@ export const SidebarContainer = styled.div`
     max-height: 100% !important;
     overflow: visible !important;
   }
+
+  && [data-afs-nav-item][data-afs-nav-active="true"] {
+    position: relative !important;
+    overflow: hidden !important;
+    border-color: var(--afs-selection-border) !important;
+    background: var(--afs-selection-bg) !important;
+    background-color: var(--afs-selection-bg) !important;
+    color: var(--afs-selection-text) !important;
+    box-shadow: inset 0 0 0 1px var(--afs-selection-border) !important;
+  }
+
+  && [data-afs-nav-item][data-afs-nav-active="true"],
+  && [data-afs-nav-item][data-afs-nav-active="true"] * {
+    color: var(--afs-selection-text) !important;
+  }
+
+  && [data-afs-nav-item][data-afs-nav-active="true"] svg,
+  && [data-afs-nav-item][data-afs-nav-active="true"] svg * {
+    color: var(--afs-selection-text) !important;
+    stroke: currentColor !important;
+  }
 `;
 
 export const CenterSidebarHeader = styled(SideBar.Header)`
@@ -87,7 +108,13 @@ export const ProductName = styled.div`
   padding: 4px 10px 8px;
 `;
 
-export const NavItemWrapper = styled.div<{ $disabled?: boolean }>`
+export const NavItemWrapper = styled.div<{ $active?: boolean; $disabled?: boolean }>`
+  [data-afs-nav-item] {
+    position: relative !important;
+    overflow: hidden !important;
+    background-clip: padding-box !important;
+  }
+
   ${({ $disabled }) =>
     $disabled
       ? `
@@ -96,6 +123,43 @@ export const NavItemWrapper = styled.div<{ $disabled?: boolean }>`
     user-select: none;
   `
       : ""}
+
+  ${({ $active }) =>
+    $active
+      ? `
+    [data-afs-nav-item],
+    [data-role="navlink"][data-state="active"] {
+      position: relative !important;
+      overflow: hidden !important;
+      border-color: var(--afs-selection-border) !important;
+      background: var(--afs-selection-bg) !important;
+      background-color: var(--afs-selection-bg) !important;
+      color: var(--afs-selection-text) !important;
+      box-shadow: inset 0 0 0 1px var(--afs-selection-border) !important;
+    }
+
+    [data-afs-nav-item] *,
+    [data-role="navlink"][data-state="active"] *,
+    [data-afs-nav-item] svg,
+    [data-role="navlink"][data-state="active"] svg {
+      color: var(--afs-selection-text) !important;
+      stroke: currentColor !important;
+    }
+  `
+      : `
+    [data-afs-nav-item]:hover,
+    [data-role="navlink"]:hover {
+      background: var(--afs-selection-hover-bg) !important;
+      background-color: var(--afs-selection-hover-bg) !important;
+      color: var(--afs-selection-hover-ink) !important;
+    }
+
+    [data-afs-nav-item]:hover *,
+    [data-role="navlink"]:hover * {
+      color: var(--afs-selection-hover-ink) !important;
+      stroke: currentColor !important;
+    }
+  `}
 `;
 
 export const ProfileMenuContainer = styled.div<{ $isExpanded: boolean }>`
@@ -219,8 +283,8 @@ export const ProfileMenuItem = styled.button`
   cursor: pointer;
 
   &:hover {
-    background: var(--afs-accent-soft);
-    color: var(--afs-accent);
+    background: var(--afs-selection-hover-bg);
+    color: var(--afs-selection-hover-ink);
   }
 
   &:disabled {

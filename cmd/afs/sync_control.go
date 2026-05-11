@@ -132,10 +132,38 @@ func parseFSDispatchArgs(args []string) (fsDispatchArgs, error) {
 	if len(args) == 0 {
 		return parsed, nil
 	}
+	for len(args) > 0 {
+		switch {
+		case args[0] == "--volume":
+			if len(args) < 2 {
+				return parsed, fmt.Errorf("missing value for --volume\n\n%s", fsUsageText(filepath.Base(os.Args[0])))
+			}
+			if strings.TrimSpace(parsed.workspace) != "" {
+				return parsed, fmt.Errorf("only one volume may be provided\n\n%s", fsUsageText(filepath.Base(os.Args[0])))
+			}
+			parsed.workspace = strings.TrimSpace(args[1])
+			args = args[2:]
+		case strings.HasPrefix(args[0], "--volume="):
+			if strings.TrimSpace(parsed.workspace) != "" {
+				return parsed, fmt.Errorf("only one volume may be provided\n\n%s", fsUsageText(filepath.Base(os.Args[0])))
+			}
+			parsed.workspace = strings.TrimSpace(strings.TrimPrefix(args[0], "--volume="))
+			args = args[1:]
+		default:
+			goto dispatch
+		}
+	}
+dispatch:
+	if len(args) == 0 {
+		return parsed, nil
+	}
 	if strings.HasPrefix(args[0], "-") {
 		return parsed, fmt.Errorf("unknown filesystem flag %q\n\n%s", args[0], fsUsageText(filepath.Base(os.Args[0])))
 	}
 	if len(args) >= 2 && isFSSubcommand(args[1]) {
+		if strings.TrimSpace(parsed.workspace) != "" {
+			return parsed, fmt.Errorf("volume specified twice\n\n%s", fsUsageText(filepath.Base(os.Args[0])))
+		}
 		parsed.workspace = strings.TrimSpace(args[0])
 		parsed.subcommand = args[1]
 		parsed.args = args[2:]
@@ -190,13 +218,13 @@ func cmdFileCreateExclusive(args []string) error {
 	}
 	st, err := loadState()
 	if err != nil {
-		return fmt.Errorf("AFS is not running in sync mode: %w\nRun '%s ws mount <workspace> <directory>' first", err, filepath.Base(os.Args[0]))
+		return fmt.Errorf("AFS is not running in sync mode: %w\nRun '%s vol mount <volume> <directory>' first", err, filepath.Base(os.Args[0]))
 	}
 	if strings.TrimSpace(st.Mode) != modeSync || st.SyncPID <= 0 || !processAlive(st.SyncPID) {
-		return fmt.Errorf("AFS is not running in sync mode\nRun '%s ws mount <workspace> <directory>' first", filepath.Base(os.Args[0]))
+		return fmt.Errorf("AFS is not running in sync mode\nRun '%s vol mount <volume> <directory>' first", filepath.Base(os.Args[0]))
 	}
 	if !runtimeStateMatchesConfig(cfg, st) {
-		return fmt.Errorf("running AFS sync process does not match the current config\nRun '%s ws mount <workspace> <directory>' again", filepath.Base(os.Args[0]))
+		return fmt.Errorf("running AFS sync process does not match the current config\nRun '%s vol mount <volume> <directory>' again", filepath.Base(os.Args[0]))
 	}
 
 	localRoot := strings.TrimSpace(st.LocalPath)
@@ -232,7 +260,7 @@ func cmdFileCreateExclusive(args []string) error {
 		return err
 	}
 	printSection(markerSuccess+" "+clr(ansiBold, "file create-exclusive"), []outputRow{
-		{Label: "workspace", Value: currentWorkspaceLabel(st.CurrentWorkspace)},
+		{Label: "volume", Value: currentWorkspaceLabel(st.CurrentWorkspace)},
 		{Label: "path", Value: result.Path},
 		{Label: "bytes", Value: fmt.Sprintf("%d", result.Bytes)},
 	})
@@ -242,6 +270,7 @@ func cmdFileCreateExclusive(args []string) error {
 func fsUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s fs [workspace] <subcommand>
+  %s fs --volume <volume> <subcommand>
   %s fs create-exclusive [options] <path>
 
 Read, search, and safely write workspace files.
@@ -263,6 +292,7 @@ Subcommands:
 Examples:
   %s fs demo ls
   %s fs ls
+  %s fs --volume demo ls
   %s fs demo cat README.md
   %s fs demo get README.md:10 -l 20
   %s fs demo multi-get 'docs/*.md' --md
@@ -272,7 +302,7 @@ Examples:
   %s fs demo grep Redis
   %s fs demo query "how do checkpoints work?"
   %s fs demo query --semantic "where is workspace config handled?"
-`, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin)
+`, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin)
 }
 
 func fileCreateExclusiveUsageText(bin string) string {

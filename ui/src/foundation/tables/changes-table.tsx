@@ -75,13 +75,13 @@ function lifecycleOperationLabel(kind?: string, op?: string): string {
     case "checkpoint.restore":
       return "Checkpoint restored";
     case "workspace.create":
-      return "Workspace created";
+      return "Volume created";
     case "workspace.import":
-      return "Workspace imported";
+      return "Volume imported";
     case "workspace.fork":
-      return "Workspace forked";
+      return "Volume forked";
     case "workspace.update":
-      return "Workspace updated";
+      return "Volume updated";
     case "session.start":
       return "Session started";
     case "session.close":
@@ -416,7 +416,7 @@ function lifecycleDetail(row: HistoryTableRow): string {
     || sessionLabel(row.sessionId)
     || row.hostname
     || row.source
-    || "Workspace event";
+    || "Volume event";
 }
 
 function lifecycleSecondary(row: HistoryTableRow, detail: string): string {

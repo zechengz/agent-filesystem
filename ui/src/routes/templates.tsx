@@ -314,7 +314,7 @@ const ProfileBadge = styled.span<{ $profile: string }>`
 function profileBackground(profile: string) {
   switch (profile) {
     case "workspace-ro":
-      return "color-mix(in srgb, #2563eb 14%, transparent)";
+      return "color-mix(in srgb, var(--afs-accent) 14%, transparent)";
     case "workspace-rw-checkpoint":
       return "color-mix(in srgb, #22c55e 18%, transparent)";
     case "workspace-rw":
@@ -326,7 +326,7 @@ function profileBackground(profile: string) {
 function profileForeground(profile: string) {
   switch (profile) {
     case "workspace-ro":
-      return "#2563eb";
+      return "var(--afs-accent)";
     case "workspace-rw-checkpoint":
       return "#16a34a";
     case "workspace-rw":

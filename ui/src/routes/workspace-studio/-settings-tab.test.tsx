@@ -80,6 +80,16 @@ vi.mock("../../foundation/hooks/use-afs", () => ({
     mutateAsync,
     isPending: false,
   }),
+  useAllAPIKeys: () => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+}));
+
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => vi.fn(),
 }));
 
 afterEach(() => {
@@ -101,8 +111,6 @@ describe("SettingsTab versioning controls", () => {
           isSaving={false}
           onDelete={vi.fn()}
           isDeleting={false}
-          mcpTokens={[]}
-          onOpenMCPConsole={vi.fn()}
         />
       </ThemeProvider>,
     );
@@ -137,8 +145,6 @@ describe("SettingsTab versioning controls", () => {
           isSaving={false}
           onDelete={vi.fn()}
           isDeleting={false}
-          mcpTokens={[]}
-          onOpenMCPConsole={vi.fn()}
         />
       </ThemeProvider>,
     );

@@ -7,12 +7,12 @@ const searchSchema = z.object({
   databaseId: z.string().optional(),
 });
 
-export const Route = createFileRoute("/mcp")({
+export const Route = createFileRoute("/api-keys")({
   validateSearch: searchSchema,
-  component: McpRouteComponent,
+  component: APIKeysRouteComponent,
 });
 
-function McpRouteComponent() {
+function APIKeysRouteComponent() {
   const search = Route.useSearch();
-  return <APIKeysPage search={search} basePath="/mcp" />;
+  return <APIKeysPage search={search} basePath="/api-keys" />;
 }

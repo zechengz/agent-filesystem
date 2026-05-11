@@ -6,9 +6,9 @@ import {
   CloudDownloadIcon,
   DatabaseIcon,
   FoldersIcon,
+  KeyIcon,
   LifeBuoyIcon,
   PieChartIcon,
-  PlugIcon,
   ShieldIcon,
   SparklesIcon,
 } from "../components/lucide-icons";
@@ -43,7 +43,7 @@ export const navigationItems: ReadonlyArray<NavigationItem> = [
   { kind: "route", label: "Monitor", path: "/", icon: PieChartIcon, title: "Monitor" },
   { kind: "route", label: "Workspaces", path: "/workspaces", icon: BotIcon },
   { kind: "route", label: "Volumes", path: "/volumes", icon: FoldersIcon },
-  { kind: "route", label: "MCP", path: "/mcp", icon: PlugIcon },
+  { kind: "route", label: "API Keys", path: "/api-keys", icon: KeyIcon },
   { kind: "route", label: "Databases", path: "/databases", icon: DatabaseIcon },
   {
     kind: "route",
@@ -122,15 +122,19 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
   }
 
   if (pathname.startsWith("/volumes")) {
-    return { page: "Volumes", subtitle: "Forkable content trees with files, checkpoints, and search." };
+    return { page: "Volumes", subtitle: "Shared folders accessible to agent workspaces" };
   }
 
   if (pathname.startsWith("/agents")) {
     return { page: "Workspaces", subtitle: "Agent topology now lives on Monitor." };
   }
 
-  if (pathname.startsWith("/mcp")) {
-    return { page: "MCP", subtitle: "Create and manage access tokens for agents." };
+  if (pathname.startsWith("/api-keys") || pathname.startsWith("/mcp")) {
+    return {
+      page: "API Keys",
+      subtitle:
+        "Create and manage API keys agents and the CLI use to reach AFS.",
+    };
   }
 
   if (pathname.startsWith("/activity")) {

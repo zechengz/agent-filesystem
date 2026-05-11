@@ -3,10 +3,39 @@ package controlplane
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 )
+
+// encodeMountCapabilities serializes the per-mount capability list as JSON for
+// the catalog. An empty list is stored as "" so legacy rows without the
+// column stay distinguishable from "explicitly no mounts".
+func encodeMountCapabilities(items []mcpAccessTokenMountCapability) (string, error) {
+	if len(items) == 0 {
+		return "", nil
+	}
+	buf, err := json.Marshal(items)
+	if err != nil {
+		return "", err
+	}
+	return string(buf), nil
+}
+
+// decodeMountCapabilities parses the JSON catalog column. Empty / nil legacy
+// rows return nil.
+func decodeMountCapabilities(raw string) ([]mcpAccessTokenMountCapability, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	var items []mcpAccessTokenMountCapability
+	if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 
 func (c *workspaceCatalog) CreateMCPAccessToken(ctx context.Context, item mcpAccessTokenRecord) error {
 	if strings.TrimSpace(item.ID) == "" {
@@ -28,7 +57,11 @@ func (c *workspaceCatalog) CreateMCPAccessToken(ctx context.Context, item mcpAcc
 			return fmt.Errorf("mcp token workspace is required for volume scope")
 		}
 	}
-	_, err := c.execContext(ctx, c.rebind(`INSERT INTO mcp_access_tokens (
+	mountCapabilitiesJSON, err := encodeMountCapabilities(item.MountCapabilities)
+	if err != nil {
+		return fmt.Errorf("encode mount_capabilities: %w", err)
+	}
+	_, err = c.execContext(ctx, c.rebind(`INSERT INTO mcp_access_tokens (
 		id,
 		name,
 		owner_subject,
@@ -41,13 +74,14 @@ func (c *workspaceCatalog) CreateMCPAccessToken(ctx context.Context, item mcpAcc
 		profile,
 		template_slug,
 		readonly,
+		mount_capabilities,
 		secret_hash,
 		secret,
 		created_at,
 		last_used_at,
 		expires_at,
 		revoked_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		strings.TrimSpace(item.ID),
 		strings.TrimSpace(item.Name),
 		strings.TrimSpace(item.OwnerSubject),
@@ -60,6 +94,7 @@ func (c *workspaceCatalog) CreateMCPAccessToken(ctx context.Context, item mcpAcc
 		strings.TrimSpace(item.Profile),
 		strings.TrimSpace(item.TemplateSlug),
 		boolToCatalogInt(item.Readonly),
+		mountCapabilitiesJSON,
 		strings.TrimSpace(item.SecretHash),
 		strings.TrimSpace(item.Secret),
 		strings.TrimSpace(item.CreatedAt),
@@ -83,6 +118,7 @@ const mcpAccessTokenSelectColumns = `
 		profile,
 		template_slug,
 		readonly,
+		mount_capabilities,
 		secret_hash,
 		secret,
 		created_at,
@@ -203,6 +239,7 @@ func scanMCPAccessTokenRows(rows *sql.Rows) ([]mcpAccessTokenRecord, error) {
 	for rows.Next() {
 		var item mcpAccessTokenRecord
 		var readonly int
+		var mountCapabilitiesJSON string
 		if err := rows.Scan(
 			&item.ID,
 			&item.Name,
@@ -216,6 +253,7 @@ func scanMCPAccessTokenRows(rows *sql.Rows) ([]mcpAccessTokenRecord, error) {
 			&item.Profile,
 			&item.TemplateSlug,
 			&readonly,
+			&mountCapabilitiesJSON,
 			&item.SecretHash,
 			&item.Secret,
 			&item.CreatedAt,
@@ -226,6 +264,11 @@ func scanMCPAccessTokenRows(rows *sql.Rows) ([]mcpAccessTokenRecord, error) {
 			return nil, err
 		}
 		item.Readonly = readonly != 0
+		caps, err := decodeMountCapabilities(mountCapabilitiesJSON)
+		if err != nil {
+			return nil, fmt.Errorf("decode mount_capabilities for %s: %w", item.ID, err)
+		}
+		item.MountCapabilities = caps
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {

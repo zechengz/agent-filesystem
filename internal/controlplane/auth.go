@@ -73,6 +73,11 @@ type AuthIdentity struct {
 	ScopedWorkspace   string
 	MCPProfile        string
 	Readonly          bool
+	// WorkspaceMountCapabilities is set for workspace-scoped MCP tokens. It
+	// maps volume_id → capability (ro/rw/rw-checkpoint) for the volumes
+	// mounted in the bound Agent Workspace composition. The MCP server and CLI
+	// HTTP middleware use this map to enforce per-mount access.
+	WorkspaceMountCapabilities map[string]string
 }
 
 type authRuntimeConfigResponse struct {
@@ -355,7 +360,13 @@ func (a *AuthHandler) DeleteCurrentIdentity(ctx context.Context) error {
 
 func (a *AuthHandler) authenticate(r *http.Request) (*AuthIdentity, error) {
 	if bearer, ok := bearerTokenFromRequest(r); ok {
-		if isMCPTokenAuthPath(r.URL.Path) {
+		// Dispatch by token prefix so a single workspace-scoped key works for
+		// both the MCP server and the CLI HTTP API. afs_mcp_* and afs_cp_*
+		// are MCP/control-plane tokens; afs_cli_* is the legacy CLI token
+		// kept for onboarding bootstrap.
+		switch {
+		case strings.HasPrefix(bearer, mcpAccessTokenPrefix+"_"),
+			strings.HasPrefix(bearer, mcpControlPlaneTokenPrefix+"_"):
 			if a.mcpAuthenticate == nil {
 				return nil, ErrUnauthorized
 			}
@@ -364,13 +375,28 @@ func (a *AuthHandler) authenticate(r *http.Request) (*AuthIdentity, error) {
 				return nil, ErrUnauthorized
 			}
 			return identity, nil
-		}
-		if a.cliAuthenticate != nil {
+		case strings.HasPrefix(bearer, cliAccessTokenPrefix+"_"):
+			if a.cliAuthenticate == nil {
+				return nil, ErrUnauthorized
+			}
 			identity, err := a.cliAuthenticate(r.Context(), bearer)
 			if err != nil {
 				return nil, ErrUnauthorized
 			}
 			return identity, nil
+		default:
+			// Unknown prefix: try MCP first, then CLI as a fallback.
+			if a.mcpAuthenticate != nil {
+				if identity, err := a.mcpAuthenticate(r.Context(), bearer); err == nil {
+					return identity, nil
+				}
+			}
+			if a.cliAuthenticate != nil {
+				if identity, err := a.cliAuthenticate(r.Context(), bearer); err == nil {
+					return identity, nil
+				}
+			}
+			return nil, ErrUnauthorized
 		}
 	}
 	if a == nil || a.mode() == AuthModeNone {

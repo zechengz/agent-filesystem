@@ -926,6 +926,14 @@ func (f *fullReconciler) execDeleteRemote(ctx context.Context, a syncAction) err
 }
 
 func (f *fullReconciler) execUpload(ctx context.Context, a syncAction) error {
+	if f.r.readonly {
+		// Read-only mounts must never push local changes back to the workspace.
+		// The mount reconcile planner already downgrades imports/uploads to
+		// "skipped" so users see this in the plan; this is the runtime guard
+		// for any path that schedules an upload directly.
+		fmt.Fprintf(os.Stderr, "afs sync: skipping upload of %s — mount is read-only\n", a.path)
+		return nil
+	}
 	data, err := os.ReadFile(a.absPath)
 	if err != nil {
 		if os.IsNotExist(err) {

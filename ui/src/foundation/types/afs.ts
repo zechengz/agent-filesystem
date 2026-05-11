@@ -983,6 +983,11 @@ export function isControlPlaneScope(scope?: string): boolean {
   );
 }
 
+export type AFSMCPTokenMountCapability = {
+  volumeId: string;
+  capability: AFSMCPCapability | string;
+};
+
 export type AFSMCPToken = {
   id: string;
   name?: string;
@@ -993,6 +998,7 @@ export type AFSMCPToken = {
   profile: AFSMCPProfile;
   capability?: AFSMCPCapability | string;
   readonly: boolean;
+  mountCapabilities?: AFSMCPTokenMountCapability[];
   token?: string;
   createdAt: string;
   lastUsedAt?: string;
@@ -1017,6 +1023,23 @@ export type CreateControlPlaneTokenInput = {
   expiresAt?: string;
 };
 
+/**
+ * Input for minting a workspace-scoped API key bound to an Agent Workspace
+ * composition. The resulting token works for both the MCP server and the CLI
+ * HTTP API. `mountCapabilities` overrides the default `capability` per mount —
+ * the backend rejects entries that reference volumes outside the workspace
+ * manifest, and refuses to upgrade a manifest-readonly mount to read+write.
+ */
+export type CreateWorkspaceAPIKeyInput = {
+  workspaceId: string;
+  name?: string;
+  capability?: AFSMCPCapability | string;
+  profile?: AFSMCPProfile;
+  mountCapabilities?: AFSMCPTokenMountCapability[];
+  expiresAt?: string;
+  templateSlug?: string;
+};
+
 export type AFSCLIAccessTokenCapability = "mount-ro" | "mount-rw";
 
 export type AFSCLIAccessToken = {
@@ -1029,8 +1052,28 @@ export type AFSCLIAccessToken = {
   capability?: AFSCLIAccessTokenCapability | string;
   token?: string;
   createdAt: string;
+  lastUsedAt?: string;
   expiresAt?: string;
+  revokedAt?: string;
 };
+
+/**
+ * APIKey is the merged shape the dashboard uses to render every credential
+ * (MCP, CLI mount, control-plane) in one table. `kind` discriminates the
+ * underlying token type so per-row actions (revoke, snippet rendering) can
+ * dispatch correctly.
+ */
+export type APIKey =
+  | ({ kind: "mcp" } & AFSMCPToken)
+  | ({ kind: "cli" } & AFSCLIAccessToken);
+
+export function asMCPAPIKey(token: AFSMCPToken): APIKey {
+  return { kind: "mcp", ...token };
+}
+
+export function asCLIAPIKey(token: AFSCLIAccessToken): APIKey {
+  return { kind: "cli", ...token };
+}
 
 export type CreateCLIAccessTokenInput = {
   databaseId?: string;

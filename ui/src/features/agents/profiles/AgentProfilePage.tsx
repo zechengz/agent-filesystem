@@ -31,10 +31,10 @@ import type {
   AFSWorkspaceCompositionMount,
 } from "../../../foundation/types/afs";
 import { MountsSection } from "./MountsSection";
-import { WorkspaceTokensSection } from "./WorkspaceTokensSection";
+import { APIKeysSummaryPanel } from "../../api-keys/APIKeysSummaryPanel";
 import type { Filesystem, Mount, MountMode, WorkspaceOption } from "./types";
 
-type ProfileTabKey = "filesystem" | "tokens" | "settings";
+type ProfileTabKey = "filesystem" | "settings";
 
 type Props = {
   profileId: string;
@@ -300,9 +300,6 @@ export function AgentProfilePage({ profileId }: Props) {
           >
             Filesystem
           </TabButton>
-          <TabButton $active={tab === "tokens"} onClick={() => setTab("tokens")}>
-            Tokens
-          </TabButton>
           <TabButton
             $active={tab === "settings"}
             onClick={() => setTab("settings")}
@@ -336,15 +333,16 @@ export function AgentProfilePage({ profileId }: Props) {
               }
             />
           ) : null}
-          {tab === "tokens" ? (
-            <WorkspaceTokensSection
-              workspaceId={profileId}
-              workspaceName={breadcrumbLabel}
-              disabled={isNew}
-            />
-          ) : null}
           {tab === "settings" ? (
             <SettingsPanel>
+              {!isNew ? (
+                <APIKeysSummaryPanel
+                  workspaceId={profileId}
+                  workspaceName={breadcrumbLabel}
+                  headline="API keys for this Agent Workspace"
+                  emptyState="No API keys for this Agent Workspace yet. Create one so agents or the CLI can reach it."
+                />
+              ) : null}
               <FieldGroup title="Identity">
                 <TwoColumnFields>
                   <Field>

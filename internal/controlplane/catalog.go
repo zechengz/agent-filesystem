@@ -174,6 +174,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			profile TEXT NOT NULL DEFAULT '',
 			template_slug TEXT NOT NULL DEFAULT '',
 			readonly INTEGER NOT NULL DEFAULT 0,
+			mount_capabilities TEXT NOT NULL DEFAULT '',
 			secret_hash TEXT NOT NULL,
 			secret TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
@@ -217,6 +218,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS secret TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS capability TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS mount_capabilities TEXT NOT NULL DEFAULT ''`,
 			`UPDATE cli_access_tokens SET scope = 'account' WHERE scope = ''`,
 			`UPDATE cli_access_tokens SET capability = 'account' WHERE capability = ''`,
 			`CREATE INDEX IF NOT EXISTS idx_cli_access_tokens_scope ON cli_access_tokens(scope)`,
@@ -255,6 +257,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 		`ALTER TABLE mcp_access_tokens ADD COLUMN secret TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE mcp_access_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE mcp_access_tokens ADD COLUMN capability TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE mcp_access_tokens ADD COLUMN mount_capabilities TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, statement := range sqliteAlterations {
 		if _, err := c.execContext(ctx, statement); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {

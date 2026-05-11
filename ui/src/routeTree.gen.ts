@@ -22,6 +22,7 @@ import { Route as DownloadsRouteImport } from './routes/downloads'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as DatabasesRouteImport } from './routes/databases'
 import { Route as ConnectCliRouteImport } from './routes/connect-cli'
+import { Route as ApiKeysRouteImport } from './routes/api-keys'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as AgentGuideRouteImport } from './routes/agent-guide'
 import { Route as AdminRouteImport } from './routes/admin'
@@ -107,6 +108,11 @@ const DatabasesRoute = DatabasesRouteImport.update({
 const ConnectCliRoute = ConnectCliRouteImport.update({
   id: '/connect-cli',
   path: '/connect-cli',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiKeysRoute = ApiKeysRouteImport.update({
+  id: '/api-keys',
+  path: '/api-keys',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsRoute = AgentsRouteImport.update({
@@ -222,6 +228,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/agent-guide': typeof AgentGuideRoute
   '/agents': typeof AgentsRoute
+  '/api-keys': typeof ApiKeysRoute
   '/connect-cli': typeof ConnectCliRoute
   '/databases': typeof DatabasesRoute
   '/docs': typeof DocsRoute
@@ -258,6 +265,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/agent-guide': typeof AgentGuideRoute
   '/agents': typeof AgentsRoute
+  '/api-keys': typeof ApiKeysRoute
   '/connect-cli': typeof ConnectCliRoute
   '/databases': typeof DatabasesRoute
   '/docs': typeof DocsRoute
@@ -295,6 +303,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/agent-guide': typeof AgentGuideRoute
   '/agents': typeof AgentsRoute
+  '/api-keys': typeof ApiKeysRoute
   '/connect-cli': typeof ConnectCliRoute
   '/databases': typeof DatabasesRoute
   '/docs': typeof DocsRoute
@@ -333,6 +342,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/agent-guide'
     | '/agents'
+    | '/api-keys'
     | '/connect-cli'
     | '/databases'
     | '/docs'
@@ -369,6 +379,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/agent-guide'
     | '/agents'
+    | '/api-keys'
     | '/connect-cli'
     | '/databases'
     | '/docs'
@@ -405,6 +416,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/agent-guide'
     | '/agents'
+    | '/api-keys'
     | '/connect-cli'
     | '/databases'
     | '/docs'
@@ -442,6 +454,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   AgentGuideRoute: typeof AgentGuideRoute
   AgentsRoute: typeof AgentsRoute
+  ApiKeysRoute: typeof ApiKeysRoute
   ConnectCliRoute: typeof ConnectCliRoute
   DatabasesRoute: typeof DatabasesRoute
   DocsRoute: typeof DocsRoute
@@ -559,6 +572,13 @@ declare module '@tanstack/react-router' {
       path: '/connect-cli'
       fullPath: '/connect-cli'
       preLoaderRoute: typeof ConnectCliRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api-keys': {
+      id: '/api-keys'
+      path: '/api-keys'
+      fullPath: '/api-keys'
+      preLoaderRoute: typeof ApiKeysRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents': {
@@ -773,6 +793,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   AgentGuideRoute: AgentGuideRoute,
   AgentsRoute: AgentsRoute,
+  ApiKeysRoute: ApiKeysRoute,
   ConnectCliRoute: ConnectCliRoute,
   DatabasesRoute: DatabasesRoute,
   DocsRoute: DocsRoute,

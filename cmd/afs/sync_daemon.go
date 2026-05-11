@@ -177,6 +177,16 @@ func (d *syncDaemon) start(ctx context.Context, onProgress ProgressFunc, skipRec
 			cancel()
 			return fmt.Errorf("initial reconcile: %w", err)
 		}
+		if d.cfg.Readonly {
+			// Lock down the mount root so user shells can't add new top-level
+			// files into a read-only volume. We can't blanket-chmod the whole
+			// tree without breaking subsequent steady-state downloads into
+			// existing subdirs; locking the root catches the most common
+			// "echo > file.txt in a readonly mount" mistake.
+			if err := os.Chmod(d.cfg.LocalRoot, 0o555); err != nil {
+				fmt.Fprintf(os.Stderr, "afs sync: chmod read-only mount root %s: %v\n", d.cfg.LocalRoot, err)
+			}
+		}
 	}
 
 	d.startQueryIndexWorker(dctx)

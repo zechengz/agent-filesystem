@@ -92,7 +92,7 @@ function TemplateInstallPage() {
       setRepairError(
         error instanceof Error
           ? error.message
-          : "Unable to recreate the access token.",
+          : "Unable to recreate the API key.",
       );
     }
   }
@@ -250,9 +250,9 @@ function TemplateInstallPage() {
 
       {primaryToken == null ? (
         <OrphanCard role="status">
-          <NoticeTitle>Access token missing</NoticeTitle>
+          <NoticeTitle>API key missing</NoticeTitle>
           <NoticeBody>
-            This template's MCP token has been revoked or deleted. Recreate it
+            This template's API key has been revoked or deleted. Recreate it
             to get a fresh bearer and restore connection instructions.
           </NoticeBody>
           {repairError ? (
@@ -268,7 +268,7 @@ function TemplateInstallPage() {
             >
               {createToken.isPending
                 ? "Recreating…"
-                : "Recreate access token"}
+                : "Recreate API key"}
             </Button>
           </div>
         </OrphanCard>
@@ -286,7 +286,7 @@ function TemplateInstallPage() {
         <DangerZoneHeader>
           <DangerZoneTitle>Uninstall template</DangerZoneTitle>
           <DangerZoneDesc>
-            Revokes this template's MCP token and deletes the workspace. All
+            Revokes this template's API key and deletes the workspace. All
             files stored in the workspace will be lost.
           </DangerZoneDesc>
         </DangerZoneHeader>
@@ -315,7 +315,7 @@ function TemplateInstallPage() {
               <div>
                 <DialogTitle>Uninstall {template.title}?</DialogTitle>
                 <DialogBody>
-                  This removes the template's MCP access and permanently
+                  This revokes the template's API key and permanently
                   deletes the workspace.
                 </DialogBody>
               </div>
@@ -344,9 +344,9 @@ function TemplateInstallPage() {
                 </SummaryValue>
               </SummaryRow>
               <SummaryRow>
-                <SummaryLabel>MCP tokens</SummaryLabel>
+                <SummaryLabel>API keys</SummaryLabel>
                 <SummaryValue>
-                  {activeTemplateTokens.length} active token
+                  {activeTemplateTokens.length} active key
                   {activeTemplateTokens.length === 1 ? "" : "s"} will be
                   revoked
                 </SummaryValue>

@@ -22,12 +22,10 @@ import {
 } from "../components/afs-kit";
 import { SurfaceCard } from "../components/card-shell";
 import { ConnectAgentBanner } from "../components/connect-agent-banner";
-import { useAuthSession } from "../foundation/auth-context";
 import type { CommandsDrawerConfig } from "../foundation/drawer-context";
 import { useDrawerCommands } from "../foundation/drawer-context";
 import {
   useDeleteWorkspaceMutation,
-  useMCPAccessTokens,
   useUpdateWorkspaceMutation,
   useWorkspace,
   workspaceQueryOptions,
@@ -66,18 +64,11 @@ export const Route = createFileRoute("/volumes/$volumeId")({
 
 function VolumeStudioPage() {
   const navigate = useNavigate();
-  const auth = useAuthSession();
   const { volumeId: workspaceId } = Route.useParams();
   const search = Route.useSearch();
   const databaseId = search.databaseId ?? null;
   const { unavailableDatabases } = useDatabaseScope();
   const workspaceQuery = useWorkspace(databaseId, workspaceId);
-  const mcpAccessReady = !auth.isLoading && auth.isAuthenticated;
-  const mcpTokensQuery = useMCPAccessTokens(
-    databaseId,
-    workspaceId,
-    mcpAccessReady,
-  );
   const deleteWorkspace = useDeleteWorkspaceMutation();
   const updateWorkspace = useUpdateWorkspaceMutation();
 
@@ -437,16 +428,6 @@ function VolumeStudioPage() {
               saveError={saveError}
               onDelete={deleteCurrentWorkspace}
               isDeleting={deleteWorkspace.isPending}
-              mcpTokens={mcpTokensQuery.data ?? []}
-              onOpenMCPConsole={() => {
-                void navigate({
-                  to: "/mcp",
-                  search: {
-                    workspaceId,
-                    ...(databaseId ? { databaseId } : {}),
-                  },
-                });
-              }}
             />
           ) : null}
         </StudioBody>

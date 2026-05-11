@@ -8,6 +8,7 @@ import {
   CloudDownload,
   Database,
   Folders,
+  KeyRound,
   Laptop,
   LifeBuoy,
   PieChart,
@@ -67,5 +68,6 @@ export const CloudDownloadIcon = makeLucideIcon(CloudDownload, "Cloud download")
 export const LifeBuoyIcon = makeLucideIcon(LifeBuoy, "Life buoy");
 export const SparklesIcon = makeLucideIcon(Sparkles, "Sparkles");
 export const PlugIcon = makeLucideIcon(Plug, "Plug");
+export const KeyIcon = makeLucideIcon(KeyRound, "Key");
 export const RefreshCwIcon = makeLucideIcon(RefreshCw, "Refresh");
 export const ShieldIcon = makeLucideIcon(Shield, "Shield");

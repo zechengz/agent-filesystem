@@ -93,7 +93,7 @@ func buildMountReconcilePlan(ctx context.Context, d *syncDaemon) (mountReconcile
 		r, rok := remote[path]
 		switch {
 		case lok && !rok:
-			plan.addLocalOnly(path, l, d.cfg.MaxFileBytes)
+			plan.addLocalOnly(path, l, d.cfg.MaxFileBytes, d.cfg.Readonly)
 		case !lok && rok:
 			plan.DownloadCount++
 			plan.Operations = append(plan.Operations, mountReconcileOperation{
@@ -138,7 +138,21 @@ func (p mountReconcilePlan) requiresConfirmation() bool {
 	return p.ImportCount > 0 || p.UploadCount > 0 || p.DownloadCount > 0 || p.SkippedCount > 0
 }
 
-func (p *mountReconcilePlan) addLocalOnly(path string, meta observedMeta, maxFileBytes int64) {
+func (p *mountReconcilePlan) addLocalOnly(path string, meta observedMeta, maxFileBytes int64, readonly bool) {
+	if readonly {
+		// Read-only mounts never push local changes upstream. Surface the
+		// local file in the plan as a skip so the user knows it will stay
+		// local-only (and can move it aside if they actually meant to add it
+		// to the workspace).
+		p.SkippedCount++
+		p.Operations = append(p.Operations, mountReconcileOperation{
+			Code:    "S",
+			Path:    path,
+			Kind:    meta.kind,
+			Details: "local only; mount is read-only — file stays local and is not uploaded",
+		})
+		return
+	}
 	if meta.kind == "file" && maxFileBytes > 0 && meta.size > maxFileBytes {
 		p.SkippedCount++
 		p.Operations = append(p.Operations, mountReconcileOperation{
@@ -177,7 +191,7 @@ func buildKnownMountReconcilePlan(ctx context.Context, d *syncDaemon, local, rem
 				})
 				continue
 			}
-			plan.addKnownUpload(path, l, d.cfg.MaxFileBytes)
+			plan.addKnownUpload(path, l, d.cfg.MaxFileBytes, d.cfg.Readonly)
 		case !lok && rok:
 			if hasStored && stored.Deleted {
 				if r.kind == "dir" && mountRemoteDirHasLiveDescendants(path, remote, st.Entries) {
@@ -187,6 +201,16 @@ func buildKnownMountReconcilePlan(ctx context.Context, d *syncDaemon, local, rem
 						Path:    path,
 						Kind:    r.kind,
 						Details: "remote directory has live children; keep local folder for downloads",
+					})
+					continue
+				}
+				if d.cfg.Readonly {
+					plan.SkippedCount++
+					plan.Operations = append(plan.Operations, mountReconcileOperation{
+						Code:    "S",
+						Path:    path,
+						Kind:    r.kind,
+						Details: "local deletion pending; mount is read-only — remote kept and will be redownloaded",
 					})
 					continue
 				}
@@ -200,6 +224,20 @@ func buildKnownMountReconcilePlan(ctx context.Context, d *syncDaemon, local, rem
 				continue
 			}
 			if hasStored {
+				if d.cfg.Readonly {
+					// Read-only mounts treat the remote as source of truth. Any
+					// state where remote exists and local is gone — whether or
+					// not the remote also changed — resolves to a redownload,
+					// never a "local deleted" / conflict.
+					plan.DownloadCount++
+					plan.Operations = append(plan.Operations, mountReconcileOperation{
+						Code:    "D",
+						Path:    path,
+						Kind:    r.kind,
+						Details: "local deleted while mount is read-only — redownload from workspace",
+					})
+					continue
+				}
 				if observedChangedFromStored(r, stored, false) {
 					plan.addConflict(path, "local deleted while remote changed")
 					continue
@@ -231,6 +269,19 @@ func buildKnownMountReconcilePlan(ctx context.Context, d *syncDaemon, local, rem
 					plan.Baseline[path] = entry
 					continue
 				}
+				if d.cfg.Readonly {
+					// Read-only mounts let the remote win without prompting; the
+					// local divergence is preserved as a conflict-copy by the
+					// downloader.
+					plan.DownloadCount++
+					plan.Operations = append(plan.Operations, mountReconcileOperation{
+						Code:    "D",
+						Path:    path,
+						Kind:    r.kind,
+						Details: "mount is read-only — redownload remote, keep local as conflict-copy",
+					})
+					continue
+				}
 				plan.addConflict(path, detail)
 				continue
 			}
@@ -240,7 +291,7 @@ func buildKnownMountReconcilePlan(ctx context.Context, d *syncDaemon, local, rem
 			case !localChanged && !remoteChanged:
 				plan.SameCount++
 			case localChanged && !remoteChanged:
-				plan.addKnownUpload(path, l, d.cfg.MaxFileBytes)
+				plan.addKnownUpload(path, l, d.cfg.MaxFileBytes, d.cfg.Readonly)
 			case !localChanged && remoteChanged:
 				plan.DownloadCount++
 				plan.Operations = append(plan.Operations, mountReconcileOperation{
@@ -250,6 +301,17 @@ func buildKnownMountReconcilePlan(ctx context.Context, d *syncDaemon, local, rem
 					Details: "remote changed while unmounted; download to local folder",
 				})
 			default:
+				if d.cfg.Readonly {
+					// Both diverged but read-only mounts always defer to remote.
+					plan.DownloadCount++
+					plan.Operations = append(plan.Operations, mountReconcileOperation{
+						Code:    "D",
+						Path:    path,
+						Kind:    r.kind,
+						Details: "mount is read-only — redownload remote, keep local as conflict-copy",
+					})
+					continue
+				}
 				entry, same, _, err := mountBaselineEntry(ctx, d, path, l, r, now)
 				if err != nil {
 					return mountReconcilePlan{}, err
@@ -266,7 +328,20 @@ func buildKnownMountReconcilePlan(ctx context.Context, d *syncDaemon, local, rem
 	return plan, nil
 }
 
-func (p *mountReconcilePlan) addKnownUpload(path string, meta observedMeta, maxFileBytes int64) {
+func (p *mountReconcilePlan) addKnownUpload(path string, meta observedMeta, maxFileBytes int64, readonly bool) {
+	if readonly {
+		// Read-only mounts can't push their local edits back. Mark as skipped
+		// so the user sees that the local divergence is intentional and the
+		// remote stays the source of truth.
+		p.SkippedCount++
+		p.Operations = append(p.Operations, mountReconcileOperation{
+			Code:    "S",
+			Path:    path,
+			Kind:    meta.kind,
+			Details: "local changed while unmounted; mount is read-only — local divergence kept, remote unchanged",
+		})
+		return
+	}
 	if meta.kind == "file" && maxFileBytes > 0 && meta.size > maxFileBytes {
 		p.SkippedCount++
 		p.Operations = append(p.Operations, mountReconcileOperation{

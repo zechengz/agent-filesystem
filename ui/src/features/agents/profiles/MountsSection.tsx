@@ -13,7 +13,6 @@ import {
   Field,
   TextInput,
   Tag,
-  ToneChip,
 } from "../../../components/afs-kit";
 import type {
   Filesystem,
@@ -73,7 +72,9 @@ export function MountsSection({
   } | null>(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [selectedVolumeIds, setSelectedVolumeIds] = useState<string[]>([]);
-  const [addMode, setAddMode] = useState<MountMode>("r");
+  // Per-volume mode in the Add Volumes dialog. Keys are volume ids; missing
+  // entries default to read-only.
+  const [addModes, setAddModes] = useState<Record<string, MountMode>>({});
 
   const rows: RowWithMeta[] = useMemo(() => {
     const out: RowWithMeta[] = [];
@@ -113,7 +114,7 @@ export function MountsSection({
 
   function openAddDialog() {
     setSelectedVolumeIds([]);
-    setAddMode("r");
+    setAddModes({});
     setAddDialogOpen(true);
   }
 
@@ -129,6 +130,10 @@ export function MountsSection({
     );
   }
 
+  function setVolumeMode(volumeId: string, mode: MountMode) {
+    setAddModes((current) => ({ ...current, [volumeId]: mode }));
+  }
+
   function addSelectedVolumes() {
     const mounts = selectedVolumeIds.flatMap((volumeId) => {
       const volume = addableVolumes.find((item) => item.id === volumeId);
@@ -137,7 +142,7 @@ export function MountsSection({
         {
           wsId: volume.id,
           mount: "/" + volume.name.replace(/^\/+/, ""),
-          mode: addMode,
+          mode: addModes[volume.id] ?? "r",
         },
       ];
     });
@@ -218,7 +223,6 @@ export function MountsSection({
               </RowFiles>
 
               <RowBadges>
-                <ToneChip $tone="git-import">Mounted</ToneChip>
                 <Tag>{row.mode === "rw" ? "read / write" : "Read-Only"}</Tag>
               </RowBadges>
 
@@ -314,8 +318,9 @@ export function MountsSection({
               <div>
                 <DialogTitle id="add-volumes-title">Add volumes</DialogTitle>
                 <DialogBody>
-                  Select one or more volumes to mount, then choose the
-                  permissions this agent should use.
+                  Pick the volumes to mount and set the permission for each.
+                  Read-only mounts block writes for every agent and key bound
+                  to this workspace.
                 </DialogBody>
               </div>
               <DialogCloseButton type="button" onClick={closeAddDialog}>
@@ -332,6 +337,7 @@ export function MountsSection({
                   <VolumeList>
                     {addableVolumes.map((volume) => {
                       const selected = selectedVolumeIds.includes(volume.id);
+                      const mode = addModes[volume.id] ?? "r";
                       return (
                         <VolumeOption key={volume.id} $selected={selected}>
                           <input
@@ -349,23 +355,26 @@ export function MountsSection({
                           <VolumeStats>
                             {volume.files.toLocaleString()} files · {volume.size}
                           </VolumeStats>
+                          <VolumeModeSelect
+                            onClick={(event) => event.preventDefault()}
+                          >
+                            <Select
+                              aria-label={`Permission for ${volume.name}`}
+                              options={[
+                                { value: "r", label: "Read only" },
+                                { value: "rw", label: "Read / write" },
+                              ]}
+                              value={mode}
+                              onChange={(value) =>
+                                setVolumeMode(volume.id, value as MountMode)
+                              }
+                            />
+                          </VolumeModeSelect>
                         </VolumeOption>
                       );
                     })}
                   </VolumeList>
                 )}
-              </Field>
-
-              <Field>
-                Permissions
-                <Select
-                  options={[
-                    { value: "r", label: "Read only" },
-                    { value: "rw", label: "Read / write" },
-                  ]}
-                  value={addMode}
-                  onChange={(value) => setAddMode(value as MountMode)}
-                />
               </Field>
             </WizardBody>
 
@@ -581,7 +590,7 @@ const VolumeList = styled.div`
 
 const VolumeOption = styled.label<{ $selected: boolean }>`
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   gap: 12px;
   align-items: center;
   padding: 12px;
@@ -601,12 +610,25 @@ const VolumeOption = styled.label<{ $selected: boolean }>`
     color: ${({ $selected }) => ($selected ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
   }
 
-  input {
+  input[type="checkbox"] {
     accent-color: var(--afs-accent);
   }
 
   @media (max-width: 560px) {
     grid-template-columns: auto minmax(0, 1fr);
+  }
+`;
+
+const VolumeModeSelect = styled.div`
+  min-width: 168px;
+
+  > * {
+    width: 100%;
+  }
+
+  @media (max-width: 560px) {
+    grid-column: 2;
+    min-width: 0;
   }
 `;
 

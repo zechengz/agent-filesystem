@@ -13,26 +13,26 @@ export function AccessTokenEmptyState({ onCreateToken, onCreateLocalToken }: Pro
         <HeroHeader>
           <Eyebrow>
             <EyebrowDot />
-            Model Context Protocol
+            API keys
           </Eyebrow>
           <HeroTitle>
-            Give your AI agents secure, scoped access to your workspace.
+            One key, one scope. Plug any agent or CLI into AFS.
           </HeroTitle>
           <HeroLede>
-            Issue an access token in seconds. Connect Claude Desktop, Cursor,
-            Windsurf — or any MCP-native client — with a token that expires,
+            Mint an API key in seconds. MCP-native agents (Claude, Cursor,
+            Windsurf), CLI mount sessions, or your own SDK — every key expires,
             can be revoked, and logs every read and write.
           </HeroLede>
           <HeroActions>
             <Button size="large" onClick={onCreateToken}>
-              Create access token
+              Create API key
             </Button>
             <Button
               size="large"
               variant="secondary-fill"
               onClick={onCreateLocalToken}
             >
-              Use local token
+              Use local stdio
             </Button>
           </HeroActions>
           <HeroMeta>
@@ -85,10 +85,10 @@ export function AccessTokenEmptyState({ onCreateToken, onCreateLocalToken }: Pro
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>
           </BenefitIcon>
-          <BenefitTitle>Scoped by token</BenefitTitle>
+          <BenefitTitle>Scoped by key</BenefitTitle>
           <BenefitBody>
-            Each token is bound to a single workspace and database. Agents
-            can only reach what you explicitly grant.
+            Each key is bound to one volume — or scoped to control plane
+            for admins. Agents only reach what you explicitly grant.
           </BenefitBody>
         </Benefit>
 
@@ -110,10 +110,10 @@ export function AccessTokenEmptyState({ onCreateToken, onCreateLocalToken }: Pro
               <circle cx="7" cy="7" r="3" />
             </svg>
           </BenefitIcon>
-          <BenefitTitle>Fine-grained profiles</BenefitTitle>
+          <BenefitTitle>Unified capability ladder</BenefitTitle>
           <BenefitBody>
-            Read-only, read / write, or read / write with checkpoints. Pick
-            the permission profile that fits the task.
+            Read, Read + write, or Read + write + checkpoints — same ladder
+            across MCP and CLI keys. Pick the level that fits the task.
           </BenefitBody>
         </Benefit>
 
@@ -135,8 +135,8 @@ export function AccessTokenEmptyState({ onCreateToken, onCreateLocalToken }: Pro
           </BenefitIcon>
           <BenefitTitle>Expiry & instant revoke</BenefitTitle>
           <BenefitBody>
-            Set a lifetime up front, or kill access in one click. Stale
-            tokens never linger past their usefulness.
+            Set a lifetime up front, or kill a key in one click. Stale
+            credentials never linger past their usefulness.
           </BenefitBody>
         </Benefit>
 
@@ -217,9 +217,9 @@ export function AccessTokenEmptyState({ onCreateToken, onCreateLocalToken }: Pro
           <StepPill>
             <StepNum>1</StepNum>
             <StepText>
-              <StepHeadline>Create a token</StepHeadline>
+              <StepHeadline>Create an API key</StepHeadline>
               <StepBody>
-                Pick a workspace, database, and permission profile.
+                Pick MCP or CLI mount, scope it, set capability.
               </StepBody>
             </StepText>
           </StepPill>
@@ -250,12 +250,12 @@ export function AccessTokenEmptyState({ onCreateToken, onCreateLocalToken }: Pro
         <FooterCtaText>
           <FooterCtaTitle>Ready to plug your agent in?</FooterCtaTitle>
           <FooterCtaBody>
-            Create your first access token and connect any MCP-compatible
-            client in under a minute.
+            Create your first API key and connect any MCP-compatible client
+            (or the AFS CLI) in under a minute.
           </FooterCtaBody>
         </FooterCtaText>
         <Button size="large" onClick={onCreateToken}>
-          Create access token
+          Create API key
         </Button>
       </FooterCta>
     </Hero>

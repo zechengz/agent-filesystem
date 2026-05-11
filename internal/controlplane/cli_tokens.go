@@ -199,6 +199,58 @@ func (m *DatabaseManager) createCLIAccessTokenRecordWithOptions(ctx context.Cont
 	return response, nil
 }
 
+// ListAllCLIAccessTokens returns every active CLI access token owned by the
+// caller's subject. Mirrors the MCP token list shape so the dashboard can
+// merge both into one view.
+func (m *DatabaseManager) ListAllCLIAccessTokens(ctx context.Context) ([]cliAccessTokenResponse, error) {
+	if m == nil || m.catalog == nil {
+		return nil, fmt.Errorf("cli token storage is unavailable")
+	}
+	subject := authSubjectFromContext(ctx)
+	items, err := m.catalog.ListAllCLIAccessTokens(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]cliAccessTokenResponse, 0, len(items))
+	for _, item := range items {
+		ownerSubject := strings.TrimSpace(item.OwnerSubject)
+		if subject != "" && ownerSubject != "" && ownerSubject != subject {
+			continue
+		}
+		// Bootstrap onboarding tokens (account scope, no workspace) are
+		// internal credentials; hide them from the dashboard list.
+		if isAccountCLIScope(item.Scope) {
+			continue
+		}
+		out = append(out, cliAccessTokenResponseFromRecord(item))
+	}
+	return out, nil
+}
+
+// RevokeCLIAccessToken marks a CLI token revoked. Scoped to the caller's
+// subject so users cannot revoke tokens belonging to others.
+func (m *DatabaseManager) RevokeCLIAccessToken(ctx context.Context, tokenID string) error {
+	if m == nil || m.catalog == nil {
+		return fmt.Errorf("cli token storage is unavailable")
+	}
+	tokenID = strings.TrimSpace(tokenID)
+	if tokenID == "" {
+		return os.ErrNotExist
+	}
+	record, err := m.catalog.GetCLIAccessToken(ctx, tokenID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(record.RevokedAt) != "" {
+		return os.ErrNotExist
+	}
+	subject := authSubjectFromContext(ctx)
+	if subject != "" && strings.TrimSpace(record.OwnerSubject) != "" && strings.TrimSpace(record.OwnerSubject) != subject {
+		return os.ErrNotExist
+	}
+	return m.catalog.RevokeCLIAccessTokenByID(ctx, tokenID, time.Now().UTC().Format(timeRFC3339))
+}
+
 func (m *DatabaseManager) AuthenticateCLIAccessToken(ctx context.Context, rawToken string) (cliAccessTokenRecord, error) {
 	if m == nil || m.catalog == nil {
 		return cliAccessTokenRecord{}, ErrCLIAccessTokenInvalid

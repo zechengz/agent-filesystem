@@ -18,107 +18,155 @@ import {
 import { getControlPlaneURL } from "../../foundation/api/afs";
 import {
   useCreateControlPlaneTokenMutation,
-  useCreateMCPAccessTokenMutation,
+  useCreateWorkspaceCompositionAPIKeyMutation,
+  useWorkspaceComposition,
+  useWorkspaceCompositions,
 } from "../../foundation/hooks/use-afs";
 import type {
   AFSMCPCapability,
   AFSMCPProfile,
   AFSMCPToken,
-  AFSWorkspaceSummary,
+  AFSMCPTokenMountCapability,
+  AFSWorkspaceCompositionMount,
 } from "../../foundation/types/afs";
 
-type WorkspaceOption = { key: string; workspace: AFSWorkspaceSummary };
+type Scope = "workspace" | "control-plane";
 
-type TokenScopeMode = "control-plane" | "volume";
+type CreatedKey = {
+  token: AFSMCPToken;
+  scope: Scope;
+  workspaceName: string;
+};
+
+/** Capability ladder shown across MCP and CLI. */
+type UnifiedCapability =
+  | "read"
+  | "read-write"
+  | "read-write-checkpoints"
+  | "admin";
 
 type Props = {
   isOpen: boolean;
   onClose: () => void;
-  workspaces: AFSWorkspaceSummary[];
   initialWorkspaceId?: string;
-  initialDatabaseId?: string;
-  initialScope?: TokenScopeMode;
+  initialScope?: Scope;
 };
 
-export function CreateMCPAccessDialog({
+export function CreateAPIKeyDialog({
   isOpen,
   onClose,
-  workspaces,
   initialWorkspaceId,
-  initialDatabaseId,
   initialScope,
 }: Props) {
-  const createWorkspaceToken = useCreateMCPAccessTokenMutation();
+  const compositionsQuery = useWorkspaceCompositions(isOpen);
+  const createWorkspaceKey = useCreateWorkspaceCompositionAPIKeyMutation();
   const createControlPlaneToken = useCreateControlPlaneTokenMutation();
 
-  const [scopeMode, setScopeMode] = useState<TokenScopeMode>(initialScope ?? "volume");
-  const [workspaceKey, setWorkspaceKey] = useState("");
+  const [scope, setScope] = useState<Scope>(initialScope ?? "workspace");
+  const [workspaceId, setWorkspaceId] = useState("");
   const [name, setName] = useState("");
-  const [capability, setCapability] = useState<AFSMCPCapability>("rw");
+  const [capability, setCapability] = useState<UnifiedCapability>("read-write");
   const [expiry, setExpiry] = useState("7d");
-  const [createdToken, setCreatedToken] = useState<AFSMCPToken | null>(null);
+  const [createdKey, setCreatedKey] = useState<CreatedKey | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [controlPlaneAck, setControlPlaneAck] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Per-mount overrides; key = volumeId. Empty means "inherit from `capability`
+  // (or 'read' when the mount is manifest-readonly)".
+  const [mountOverrides, setMountOverrides] = useState<Record<string, UnifiedCapability>>({});
 
-  const options: WorkspaceOption[] = useMemo(
+  const compositions = useMemo(
     () =>
-      workspaces
+      (compositionsQuery.data ?? [])
         .slice()
-        .sort((left, right) => left.name.localeCompare(right.name))
-        .map((workspace) => ({
-          key: keyFor(workspace.databaseId, workspace.id),
-          workspace,
-        })),
-    [workspaces],
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    [compositionsQuery.data],
   );
+  const compositionDetailQuery = useWorkspaceComposition(
+    workspaceId,
+    isOpen && scope === "workspace" && workspaceId !== "",
+  );
+  const mounts: AFSWorkspaceCompositionMount[] =
+    compositionDetailQuery.data?.mounts ?? [];
 
   useEffect(() => {
     if (!isOpen) return;
-    setCreatedToken(null);
+    setCreatedKey(null);
     setFormError(null);
     setName("");
-    setCapability("rw");
+    setCapability("read-write");
     setExpiry("7d");
-    setScopeMode(initialScope ?? "volume");
-    const requestedKey =
-      initialWorkspaceId && initialDatabaseId
-        ? keyFor(initialDatabaseId, initialWorkspaceId)
-        : "";
-    const fallback = options[0]?.key ?? "";
-    const match = options.find((option) => option.key === requestedKey)?.key;
-    setWorkspaceKey(match ?? fallback);
-  }, [isOpen, initialDatabaseId, initialWorkspaceId, initialScope, options]);
+    setControlPlaneAck(false);
+    setMountOverrides({});
+    setScope(initialScope ?? "workspace");
+    const fallback = compositions[0]?.id ?? "";
+    const match = compositions.find(
+      (composition) => composition.id === initialWorkspaceId,
+    )?.id;
+    setWorkspaceId(match ?? fallback);
+  }, [isOpen, initialScope, initialWorkspaceId, compositions]);
 
-  const selected = options.find((option) => option.key === workspaceKey)?.workspace ?? null;
-  const pending = createWorkspaceToken.isPending || createControlPlaneToken.isPending;
+  // Reset per-mount overrides when the workspace changes so we don't carry
+  // stale volume ids from the previous composition.
+  useEffect(() => {
+    setMountOverrides({});
+  }, [workspaceId]);
+
+  const selected = compositions.find((c) => c.id === workspaceId) ?? null;
+  const effectiveMountCap = (mount: AFSWorkspaceCompositionMount): UnifiedCapability =>
+    mount.readonly
+      ? "read"
+      : (mountOverrides[mount.volumeId] ?? capability);
+  const pending =
+    createWorkspaceKey.isPending || createControlPlaneToken.isPending;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending) return;
     setFormError(null);
     try {
-      if (scopeMode === "control-plane") {
+      if (scope === "control-plane") {
+        if (!controlPlaneAck) {
+          setFormError(
+            "Confirm you understand control-plane keys grant account-wide admin.",
+          );
+          return;
+        }
         const token = await createControlPlaneToken.mutateAsync({
           name: name.trim() || undefined,
           expiresAt: expiryValueToTimestamp(expiry),
         });
-        setCreatedToken(token);
+        setCreatedKey({
+          token,
+          scope: "control-plane",
+          workspaceName: "control plane",
+        });
         return;
       }
       if (selected == null) return;
-      const token = await createWorkspaceToken.mutateAsync({
-        databaseId: selected.databaseId,
+      const mcpCapability = unifiedToMCP(capability);
+      const mountCapabilities: AFSMCPTokenMountCapability[] = mounts.map(
+        (mount) => ({
+          volumeId: mount.volumeId,
+          capability: unifiedToMCP(effectiveMountCap(mount)),
+        }),
+      );
+      const token = await createWorkspaceKey.mutateAsync({
         workspaceId: selected.id,
         name: name.trim() || undefined,
-        profile: profileForCapability(capability),
-        scope: `volume:${selected.id}`,
-        capability,
+        profile: profileForCapability(mcpCapability),
+        capability: mcpCapability,
+        mountCapabilities,
         expiresAt: expiryValueToTimestamp(expiry),
       });
-      setCreatedToken(token);
+      setCreatedKey({
+        token,
+        scope: "workspace",
+        workspaceName: token.workspaceName ?? selected.name,
+      });
     } catch (error) {
       setFormError(
-        error instanceof Error ? error.message : "Unable to create access token.",
+        error instanceof Error ? error.message : "Unable to create API key.",
       );
     }
   }
@@ -137,24 +185,28 @@ export function CreateMCPAccessDialog({
 
   if (!isOpen) return null;
 
-  const mcpEndpoint = `${getControlPlaneURL().replace(/\/+$/, "")}/mcp`;
-  const createdSnippet = createdToken
-    ? buildSnippet({
-        token: createdToken.token ?? "",
-        url: mcpEndpoint,
-        serverName:
-          createdToken.scope === "control-plane"
-            ? "agent-filesystem"
-            : `afs-${(createdToken.workspaceName ?? selected?.name ?? "volume").trim()}`,
-      })
-    : null;
+  const createdSnippet = createdKey ? buildCreatedSnippet(createdKey) : null;
+  const createdLoginSnippet =
+    createdKey && createdKey.scope === "workspace"
+      ? buildCLILoginSnippet(
+          createdKey.token.token ?? "",
+          createdKey.workspaceName,
+        )
+      : null;
+  const createdTokenString = createdKey?.token.token ?? "";
+
+  const submitDisabled = (() => {
+    if (pending) return true;
+    if (scope === "workspace" && selected == null) return true;
+    if (scope === "control-plane" && !controlPlaneAck) return true;
+    return false;
+  })();
 
   const submitLabel = (() => {
-    if (createdToken) return null;
-    if (pending) {
-      return scopeMode === "control-plane" ? "Issuing..." : "Creating...";
-    }
-    return scopeMode === "control-plane" ? "Issue control-plane token" : "Create volume token";
+    if (createdKey) return null;
+    if (pending) return "Creating...";
+    if (scope === "control-plane") return "Issue control-plane key";
+    return "Create workspace key";
   })();
 
   return (
@@ -167,29 +219,31 @@ export function CreateMCPAccessDialog({
         <DialogHeader>
           <div>
             <DialogTitle>
-              {createdToken ? "Access token created" : "Create access token"}
+              {createdKey ? "API key created" : "Create API key"}
             </DialogTitle>
             <DialogBody>
-              {createdToken
-                ? "Copy the config below into your MCP client. The token is shown once \u2014 store it safely."
-                : "Issue a bearer token an MCP client can use. Pick a scope to decide what it's allowed to do."}
+              {createdKey
+                ? "Copy the key below. It's shown once — store it safely."
+                : "Pick what this key reaches: one Agent Workspace, or your whole account."}
             </DialogBody>
           </div>
           <DialogCloseButton onClick={handleClose}>&times;</DialogCloseButton>
         </DialogHeader>
 
-        {createdToken ? (
+        {createdKey ? (
           <CreatedPanel>
             <FieldBlock>
-              <FieldLabel>Token</FieldLabel>
-              <CodeBlock>{createdToken.token ?? "(not returned)"}</CodeBlock>
+              <FieldLabel>API key</FieldLabel>
+              <CodeBlock>{createdTokenString || "(not returned)"}</CodeBlock>
               <InlineActionsRight>
                 <Button
                   size="small"
                   variant="secondary-fill"
-                  onClick={() => createdToken.token && copy(createdToken.token, "token")}
+                  onClick={() =>
+                    createdTokenString && copy(createdTokenString, "key")
+                  }
                 >
-                  {copied === "token" ? "Copied!" : "Copy token"}
+                  {copied === "key" ? "Copied!" : "Copy key"}
                 </Button>
               </InlineActionsRight>
             </FieldBlock>
@@ -204,7 +258,23 @@ export function CreateMCPAccessDialog({
                     variant="secondary-fill"
                     onClick={() => copy(createdSnippet, "snippet")}
                   >
-                    {copied === "snippet" ? "Copied!" : "Copy config"}
+                    {copied === "snippet" ? "Copied!" : "Copy snippet"}
+                  </Button>
+                </InlineActionsRight>
+              </FieldBlock>
+            ) : null}
+
+            {createdLoginSnippet ? (
+              <FieldBlock>
+                <FieldLabel>CLI login + mount</FieldLabel>
+                <CodeBlock>{createdLoginSnippet}</CodeBlock>
+                <InlineActionsRight>
+                  <Button
+                    size="small"
+                    variant="secondary-fill"
+                    onClick={() => copy(createdLoginSnippet, "cli")}
+                  >
+                    {copied === "cli" ? "Copied!" : "Copy CLI"}
                   </Button>
                 </InlineActionsRight>
               </FieldBlock>
@@ -218,53 +288,55 @@ export function CreateMCPAccessDialog({
           </CreatedPanel>
         ) : (
           <FormGrid onSubmit={submit}>
-            <ScopeField>
+            <FieldGroup>
               <FieldLabel>Scope</FieldLabel>
-              <ScopeRow>
-                <ScopeOption $selected={scopeMode === "volume"}>
+              <OptionRow>
+                <OptionTile $selected={scope === "workspace"}>
                   <input
                     type="radio"
-                    checked={scopeMode === "volume"}
-                    onChange={() => setScopeMode("volume")}
+                    checked={scope === "workspace"}
+                    onChange={() => setScope("workspace")}
                   />
-                  <ScopeLabel>
-                    <ScopeName>Volume</ScopeName>
-                    <ScopeHint>
-                      File tools scoped to one content tree.
-                    </ScopeHint>
-                  </ScopeLabel>
-                </ScopeOption>
-                <ScopeOption $selected={scopeMode === "control-plane"}>
+                  <OptionLabel>
+                    <OptionName>Workspace</OptionName>
+                    <OptionHint>
+                      Bound to one Agent Workspace — same key works for MCP
+                      clients and the CLI.
+                    </OptionHint>
+                  </OptionLabel>
+                </OptionTile>
+                <OptionTile $selected={scope === "control-plane"}>
                   <input
                     type="radio"
-                    checked={scopeMode === "control-plane"}
-                    onChange={() => setScopeMode("control-plane")}
+                    checked={scope === "control-plane"}
+                    onChange={() => setScope("control-plane")}
                   />
-                  <ScopeLabel>
-                    <ScopeName>Control plane</ScopeName>
-                    <ScopeHint>
-                      Manage workspaces + mint scoped tokens on demand.
-                    </ScopeHint>
-                  </ScopeLabel>
-                </ScopeOption>
-              </ScopeRow>
-            </ScopeField>
+                  <OptionLabel>
+                    <OptionName>Control plane</OptionName>
+                    <OptionHint>
+                      Account-wide admin — manage workspaces + mint scoped
+                      keys.
+                    </OptionHint>
+                  </OptionLabel>
+                </OptionTile>
+              </OptionRow>
+            </FieldGroup>
 
-            {scopeMode === "volume" ? (
+            {scope === "workspace" ? (
               <Field>
-                Volume
+                Agent Workspace
                 <Select
                   options={
-                    options.length === 0
-                      ? [{ value: "", label: "No volumes available" }]
-                      : options.map((option) => ({
-                          value: option.key,
-                          label: option.workspace.name,
+                    compositions.length === 0
+                      ? [{ value: "", label: "No Agent Workspaces yet" }]
+                      : compositions.map((composition) => ({
+                          value: composition.id,
+                          label: composition.name,
                         }))
                   }
-                  value={workspaceKey}
-                  onChange={(next) => setWorkspaceKey(next)}
-                  disabled={options.length === 0}
+                  value={workspaceId}
+                  onChange={(next) => setWorkspaceId(next)}
+                  disabled={compositions.length === 0}
                 />
               </Field>
             ) : null}
@@ -275,26 +347,91 @@ export function CreateMCPAccessDialog({
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 placeholder={
-                  scopeMode === "control-plane"
+                  scope === "control-plane"
                     ? "e.g. dev laptop, staging agent"
                     : "Codex on Rowan's Mac"
                 }
               />
             </Field>
 
-            {scopeMode === "volume" ? (
-              <Field>
-                Capability
-                <Select
-                  options={[
-                    { value: "ro", label: "Read only" },
-                    { value: "rw", label: "Read / write" },
-                    { value: "rw-checkpoint", label: "Read / write + checkpoints" },
-                  ]}
-                  value={capability}
-                  onChange={(next) => setCapability(next as AFSMCPCapability)}
-                />
-              </Field>
+            {scope === "workspace" ? (
+              mounts.length > 0 ? (
+                <FieldGroup>
+                  <FieldLabel>Per-volume access</FieldLabel>
+                  <MountList>
+                    {mounts.map((mount) => {
+                      const cap = effectiveMountCap(mount);
+                      const lockedReadonly = mount.readonly;
+                      return (
+                        <MountRow key={mount.volumeId}>
+                          <MountInfo>
+                            <MountPath>
+                              {mount.mountPath || "/"}
+                            </MountPath>
+                            <MountVolume>
+                              {mount.volumeName ?? mount.volumeId}
+                              {lockedReadonly ? " · manifest readonly" : ""}
+                            </MountVolume>
+                          </MountInfo>
+                          <MountSelect>
+                            <Select
+                              aria-label={`Capability for ${
+                                mount.volumeName ?? mount.volumeId
+                              }`}
+                              options={
+                                lockedReadonly
+                                  ? [{ value: "read", label: "Read" }]
+                                  : [
+                                      { value: "read", label: "Read" },
+                                      {
+                                        value: "read-write",
+                                        label: "Read + write",
+                                      },
+                                      {
+                                        value: "read-write-checkpoints",
+                                        label: "Read + write + checkpoints",
+                                      },
+                                    ]
+                              }
+                              value={cap}
+                              onChange={(next) =>
+                                setMountOverrides((prev) => ({
+                                  ...prev,
+                                  [mount.volumeId]: next as UnifiedCapability,
+                                }))
+                              }
+                              disabled={lockedReadonly}
+                            />
+                          </MountSelect>
+                        </MountRow>
+                      );
+                    })}
+                  </MountList>
+                  <MountHint>
+                    Each mount carries its own permission on this key. The
+                    workspace manifest is the upper bound — readonly mounts
+                    stay readonly.
+                  </MountHint>
+                </FieldGroup>
+              ) : (
+                <Field>
+                  Capability
+                  <Select
+                    options={[
+                      { value: "read", label: "Read" },
+                      { value: "read-write", label: "Read + write" },
+                      {
+                        value: "read-write-checkpoints",
+                        label: "Read + write + checkpoints",
+                      },
+                    ]}
+                    value={capability}
+                    onChange={(next) =>
+                      setCapability(next as UnifiedCapability)
+                    }
+                  />
+                </Field>
+              )
             ) : null}
 
             <Field>
@@ -312,10 +449,29 @@ export function CreateMCPAccessDialog({
             </Field>
 
             <ToolPreview>
-              {toolListForScope(scopeMode, capability).map((tool) => (
+              {toolListForKey(scope, capability).map((tool) => (
                 <ToolChip key={tool}>{tool}</ToolChip>
               ))}
             </ToolPreview>
+
+            {scope === "control-plane" ? (
+              <ControlPlaneNotice>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={controlPlaneAck}
+                    onChange={(event) =>
+                      setControlPlaneAck(event.target.checked)
+                    }
+                  />
+                  <span>
+                    I understand control-plane keys grant account-wide
+                    admin — they can mint, revoke, and manage every other
+                    key.
+                  </span>
+                </label>
+              </ControlPlaneNotice>
+            ) : null}
 
             {formError ? <DialogError role="alert">{formError}</DialogError> : null}
 
@@ -329,13 +485,7 @@ export function CreateMCPAccessDialog({
               >
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                size="medium"
-                disabled={
-                  pending || (scopeMode === "volume" && selected == null)
-                }
-              >
+              <Button type="submit" size="medium" disabled={submitDisabled}>
                 {submitLabel}
               </Button>
             </DialogActions>
@@ -346,9 +496,8 @@ export function CreateMCPAccessDialog({
   );
 }
 
-function keyFor(databaseId: string, workspaceId: string) {
-  return `${databaseId}::${workspaceId}`;
-}
+/** Back-compat alias — existing consumers can keep the old name. */
+export const CreateMCPAccessDialog = CreateAPIKeyDialog;
 
 function expiryValueToTimestamp(value: string) {
   if (value === "never") return undefined;
@@ -364,44 +513,35 @@ function expiryValueToTimestamp(value: string) {
   }
 }
 
-function buildSnippet({
-  token,
-  url,
-  serverName,
-}: {
-  token: string;
-  url: string;
-  serverName: string;
-}) {
-  return JSON.stringify(
-    {
-      mcpServers: {
-        [serverName]: {
-          url,
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      },
-    },
-    null,
-    2,
-  );
-}
-
 function profileForCapability(capability: AFSMCPCapability): AFSMCPProfile {
   switch (capability) {
     case "ro":
       return "workspace-ro";
     case "rw-checkpoint":
       return "workspace-rw-checkpoint";
+    case "admin":
+      return "admin-rw";
     case "rw":
     default:
       return "workspace-rw";
   }
 }
 
-function toolListForScope(scope: TokenScopeMode, capability: AFSMCPCapability) {
+function unifiedToMCP(value: UnifiedCapability): AFSMCPCapability {
+  switch (value) {
+    case "read":
+      return "ro";
+    case "read-write-checkpoints":
+      return "rw-checkpoint";
+    case "admin":
+      return "admin";
+    case "read-write":
+    default:
+      return "rw";
+  }
+}
+
+function toolListForKey(scope: Scope, capability: UnifiedCapability): string[] {
   if (scope === "control-plane") {
     return [
       "workspace_list",
@@ -417,42 +557,75 @@ function toolListForScope(scope: TokenScopeMode, capability: AFSMCPCapability) {
     ];
   }
   switch (capability) {
-    case "ro":
+    case "read":
       return ["file_read", "file_lines", "file_list", "file_glob", "file_grep"];
-    case "rw":
+    case "read-write-checkpoints":
       return [
         "file_read",
-        "file_lines",
-        "file_list",
-        "file_glob",
-        "file_grep",
         "file_write",
-        "file_create_exclusive",
-        "file_replace",
-        "file_insert",
-        "file_delete_lines",
-        "file_patch",
-      ];
-    case "rw-checkpoint":
-      return [
-        "file_read",
-        "file_lines",
-        "file_list",
-        "file_glob",
-        "file_grep",
-        "file_write",
-        "file_create_exclusive",
-        "file_replace",
-        "file_insert",
-        "file_delete_lines",
         "file_patch",
         "checkpoint_list",
         "checkpoint_create",
         "checkpoint_restore",
+        "afs ws mount",
       ];
+    case "read-write":
     default:
-      return ["profile-specific admin tools"];
+      return [
+        "file_read",
+        "file_write",
+        "file_patch",
+        "file_grep",
+        "afs ws mount",
+      ];
   }
+}
+
+function buildCreatedSnippet(created: CreatedKey): string {
+  return buildMCPClientConfig({
+    token: created.token.token ?? "",
+    workspaceName: created.workspaceName,
+    controlPlane: created.scope === "control-plane",
+  });
+}
+
+function buildMCPClientConfig({
+  token,
+  workspaceName,
+  controlPlane,
+}: {
+  token: string;
+  workspaceName: string;
+  controlPlane: boolean;
+}) {
+  const serverName = controlPlane
+    ? "agent-filesystem"
+    : `afs-${(workspaceName || "workspace").trim()}`;
+  return JSON.stringify(
+    {
+      mcpServers: {
+        [serverName]: {
+          url: `${getControlPlaneURL().replace(/\/+$/, "")}/mcp`,
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      },
+    },
+    null,
+    2,
+  );
+}
+
+function buildCLILoginSnippet(token: string, workspaceName: string) {
+  return [
+    `afs auth login --url ${shellQuote(getControlPlaneURL())} --access-token ${shellQuote(token)}`,
+    `afs ws mount ${shellQuote(workspaceName || "<workspace>")} <directory>`,
+  ].join("\n");
+}
+
+function shellQuote(value: string) {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 const CreatedPanel = styled.div`
@@ -463,6 +636,11 @@ const CreatedPanel = styled.div`
 const FieldBlock = styled.div`
   display: grid;
   gap: 8px;
+`;
+
+const FieldGroup = styled.div`
+  display: grid;
+  gap: 10px;
 `;
 
 const FieldLabel = styled.span`
@@ -510,12 +688,7 @@ const ToolChip = styled.span`
   font-weight: 700;
 `;
 
-const ScopeField = styled.div`
-  display: grid;
-  gap: 10px;
-`;
-
-const ScopeRow = styled.div`
+const OptionRow = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
@@ -525,25 +698,31 @@ const ScopeRow = styled.div`
   }
 `;
 
-const ScopeOption = styled.label<{ $selected: boolean }>`
+const OptionTile = styled.label<{ $selected: boolean }>`
   display: flex;
   align-items: flex-start;
   gap: 10px;
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid ${({ $selected }) => ($selected ? "var(--afs-selection-border)" : "var(--afs-line)")};
+  border: 1px solid
+    ${({ $selected }) =>
+      $selected ? "var(--afs-selection-border)" : "var(--afs-line)"};
   background: ${({ $selected }) =>
-    $selected
-      ? "var(--afs-selection-bg)"
-      : "var(--afs-panel)"};
-  color: ${({ $selected }) => ($selected ? "var(--afs-selection-text)" : "var(--afs-ink)")};
+    $selected ? "var(--afs-selection-bg)" : "var(--afs-panel)"};
+  color: ${({ $selected }) =>
+    $selected ? "var(--afs-selection-text)" : "var(--afs-ink)"};
   cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
 
   &:hover {
     border-color: var(--afs-selection-border);
-    background: ${({ $selected }) => ($selected ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)")};
-    color: ${({ $selected }) => ($selected ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
+    background: ${({ $selected }) =>
+      $selected ? "var(--afs-selection-bg)" : "var(--afs-selection-hover-bg)"};
+    color: ${({ $selected }) =>
+      $selected ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)"};
   }
 
   input[type="radio"] {
@@ -551,20 +730,97 @@ const ScopeOption = styled.label<{ $selected: boolean }>`
   }
 `;
 
-const ScopeLabel = styled.div`
+const OptionLabel = styled.div`
   display: flex;
   flex-direction: column;
   gap: 2px;
 `;
 
-const ScopeName = styled.div`
+const OptionName = styled.div`
   color: var(--afs-ink);
   font-size: 13.5px;
   font-weight: 700;
 `;
 
-const ScopeHint = styled.div`
+const OptionHint = styled.div`
   color: var(--afs-muted);
   font-size: 12px;
   line-height: 1.45;
+`;
+
+const MountList = styled.div`
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--afs-line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--afs-panel);
+`;
+
+const MountRow = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 4px;
+  border-radius: 8px;
+
+  & + & {
+    border-top: 1px dashed var(--afs-line);
+    padding-top: 12px;
+  }
+`;
+
+const MountInfo = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+`;
+
+const MountPath = styled.div`
+  color: var(--afs-ink);
+  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+  font-weight: 600;
+`;
+
+const MountVolume = styled.div`
+  color: var(--afs-muted);
+  font-size: 11.5px;
+`;
+
+const MountSelect = styled.div`
+  min-width: 220px;
+
+  > * {
+    width: 100%;
+  }
+`;
+
+const MountHint = styled.div`
+  color: var(--afs-muted);
+  font-size: 12px;
+  line-height: 1.5;
+`;
+
+const ControlPlaneNotice = styled.div`
+  border: 1px solid color-mix(in srgb, #d97706 40%, var(--afs-line));
+  background: color-mix(in srgb, #d97706 10%, transparent);
+  border-radius: 12px;
+  padding: 12px 14px;
+
+  label {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    color: var(--afs-ink);
+    font-size: 13px;
+    line-height: 1.5;
+    cursor: pointer;
+  }
+
+  input[type="checkbox"] {
+    margin-top: 4px;
+  }
 `;

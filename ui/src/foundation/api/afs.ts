@@ -19,6 +19,7 @@ import type {
   CreateMCPTokenInput,
   CreateCLIAccessTokenInput,
   CreateControlPlaneTokenInput,
+  CreateWorkspaceAPIKeyInput,
   CreateWorkspaceInput,
   GetWorkspaceFileContentInput,
   GetWorkspaceDiffInput,
@@ -202,9 +203,14 @@ type AFSClient = {
     workspaceId: string,
   ) => Promise<AFSMCPToken[]>;
   createMCPAccessToken: (input: CreateMCPTokenInput) => Promise<AFSMCPToken>;
+  createWorkspaceCompositionAPIKey: (
+    input: CreateWorkspaceAPIKeyInput,
+  ) => Promise<AFSMCPToken>;
   createCLIAccessToken: (
     input: CreateCLIAccessTokenInput,
   ) => Promise<AFSCLIAccessToken>;
+  listAllCLIAccessTokens: () => Promise<AFSCLIAccessToken[]>;
+  revokeCLIAccessToken: (tokenId: string) => Promise<void>;
   revokeMCPAccessToken: (
     databaseId: string | undefined,
     workspaceId: string,
@@ -885,6 +891,7 @@ type HTTPMCPToken = {
   profile?: string;
   capability?: string;
   readonly?: boolean;
+  mount_capabilities?: { volume_id: string; capability: string }[];
   token?: string;
   created_at: string;
   last_used_at?: string;
@@ -903,7 +910,9 @@ type HTTPCLIAccessToken = {
   capability?: string;
   token?: string;
   created_at: string;
+  last_used_at?: string;
   expires_at?: string;
+  revoked_at?: string;
 };
 
 function mapHTTPMCPToken(
@@ -922,6 +931,10 @@ function mapHTTPMCPToken(
       profileFallback) as AFSMCPToken["profile"],
     capability: item.capability,
     readonly: Boolean(item.readonly),
+    mountCapabilities: (item.mount_capabilities ?? []).map((mc) => ({
+      volumeId: mc.volume_id,
+      capability: mc.capability,
+    })),
     token: item.token,
     createdAt: item.created_at,
     lastUsedAt: item.last_used_at,
@@ -942,7 +955,9 @@ function mapHTTPCLIAccessToken(item: HTTPCLIAccessToken): AFSCLIAccessToken {
     capability: item.capability,
     token: item.token,
     createdAt: item.created_at,
+    lastUsedAt: item.last_used_at,
     expiresAt: item.expires_at,
+    revokedAt: item.revoked_at,
   };
 }
 
@@ -2589,7 +2604,19 @@ This workspace was created from the AFS Web UI.
     throw new Error("MCP tokens are not available in demo mode.");
   },
 
+  async createWorkspaceCompositionAPIKey() {
+    throw new Error("API keys are not available in demo mode.");
+  },
+
   async createCLIAccessToken() {
+    throw new Error("CLI access tokens are not available in demo mode.");
+  },
+
+  async listAllCLIAccessTokens() {
+    return [] as AFSCLIAccessToken[];
+  },
+
+  async revokeCLIAccessToken() {
     throw new Error("CLI access tokens are not available in demo mode.");
   },
 
@@ -4484,6 +4511,27 @@ const httpAFSClient: AFSClient = {
     return mapHTTPMCPToken(response, { profileFallback: input.profile });
   },
 
+  async createWorkspaceCompositionAPIKey(input: CreateWorkspaceAPIKeyInput) {
+    const response = await requestJSON<HTTPMCPToken>(
+      `/v2/workspaces/${encodeURIComponent(input.workspaceId)}/api-keys`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: input.name,
+          capability: input.capability,
+          profile: input.profile,
+          mount_capabilities: (input.mountCapabilities ?? []).map((mc) => ({
+            volume_id: mc.volumeId,
+            capability: mc.capability,
+          })),
+          expires_at: input.expiresAt,
+          template_slug: input.templateSlug,
+        }),
+      },
+    );
+    return mapHTTPMCPToken(response, { profileFallback: input.profile });
+  },
+
   async createCLIAccessToken(input: CreateCLIAccessTokenInput) {
     const response = await requestJSON<HTTPCLIAccessToken>(
       `${workspaceBasePath(input.databaseId, input.workspaceId)}/cli-tokens`,
@@ -4498,6 +4546,19 @@ const httpAFSClient: AFSClient = {
       },
     );
     return mapHTTPCLIAccessToken(response);
+  },
+
+  async listAllCLIAccessTokens() {
+    const response = await requestJSON<{ items: HTTPCLIAccessToken[] }>(
+      "/cli-tokens",
+    );
+    return response.items.map(mapHTTPCLIAccessToken);
+  },
+
+  async revokeCLIAccessToken(tokenId: string) {
+    await requestJSON<void>(`/cli-tokens/${encodeURIComponent(tokenId)}`, {
+      method: "DELETE",
+    });
   },
 
   async revokeMCPAccessToken(

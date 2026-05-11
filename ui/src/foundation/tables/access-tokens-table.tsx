@@ -1,4 +1,4 @@
-import { Button, Typography } from "@redis-ui/components";
+import { Button, Select, Typography } from "@redis-ui/components";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useMemo, useState } from "react";
@@ -16,79 +16,68 @@ import {
 import { PlugIcon } from "../../components/lucide-icons";
 import { getControlPlaneURL } from "../api/afs";
 import { isControlPlaneScope } from "../types/afs";
-import type { AFSMCPProfile, AFSMCPToken } from "../types/afs";
+import type { AFSMCPProfile, APIKey } from "../types/afs";
 import { findTemplate } from "../../features/templates/templates-data";
 import { compareValues } from "../sort-compare";
+import { formatCapability } from "./api-key-format";
 import * as S from "./workspace-table.styles";
 
-type AccessTokenSortField = "name" | "workspaceName" | "lastUsedAt" | "expiresAt" | "createdAt";
+export { formatCapability } from "./api-key-format";
+
+type APIKeySortField =
+  | "name"
+  | "scope"
+  | "lastUsedAt"
+  | "expiresAt"
+  | "createdAt";
+
+export type APIKeyFilterChip = "all" | "workspace" | "control-plane";
 
 type Props = {
-  rows: AFSMCPToken[];
+  rows: APIKey[];
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
   workspaceNameById?: Map<string, string>;
   databaseNameById?: Map<string, string>;
   toolbarAction?: ReactNode;
-  onRevoke: (token: AFSMCPToken) => void;
+  onRevoke: (key: APIKey) => void;
   revoking?: boolean;
+  initialFilter?: APIKeyFilterChip;
 };
 
-function formatProfile(profile: AFSMCPProfile) {
-  switch (profile) {
-    case "workspace-ro":
-      return "Read only";
-    case "workspace-rw":
-      return "Read / write";
-    case "workspace-rw-checkpoint":
-      return "Read / write + checkpoints";
-    case "admin-ro":
-      return "Admin read only";
-    case "admin-rw":
-      return "Admin read / write";
-    default:
-      return profile;
-  }
+/* ------------------------------------------------------------------ */
+/*  Formatters                                                        */
+/* ------------------------------------------------------------------ */
+
+function keyScopeKind(key: APIKey): "control-plane" | "workspace" {
+  if (isControlPlaneScope(key.scope)) return "control-plane";
+  return "workspace";
 }
 
-function formatCapability(capability?: string, profile?: AFSMCPProfile) {
-  switch (capability) {
-    case "ro":
-      return "Read only";
-    case "rw":
-      return "Read / write";
-    case "rw-checkpoint":
-      return "Read / write + checkpoints";
-    case "admin":
-      return "Admin";
-    default:
-      return profile ? formatProfile(profile) : "Default";
+/**
+ * Summarizes the capability column for the table + detail view. If the key
+ * carries per-mount overrides and they're not all identical, we render "Mixed"
+ * — the detail panel exposes the per-mount breakdown.
+ */
+function summarizeCapability(
+  key: APIKey,
+  profile?: AFSMCPProfile,
+): string {
+  if (key.kind === "mcp" && key.mountCapabilities && key.mountCapabilities.length > 0) {
+    const unique = new Set(
+      key.mountCapabilities.map((mc) => mc.capability),
+    );
+    if (unique.size === 1) {
+      return formatCapability(key.mountCapabilities[0].capability, profile);
+    }
+    return "Mixed";
   }
+  return formatCapability(key.capability, profile);
 }
 
-function tokenScopeKind(token: AFSMCPToken) {
-  const scope = token.scope?.trim() ?? "";
-  if (isControlPlaneScope(scope)) return "control-plane";
-  if (scope.startsWith("volume:")) return "volume";
-  if (scope.startsWith("workspace:")) return "workspace";
-  if (scope.startsWith("database:")) return "database";
-  return token.workspaceId ? "volume" : "unknown";
-}
-
-function formatScopeKind(scopeKind: string) {
-  switch (scopeKind) {
-    case "control-plane":
-      return "Control plane";
-    case "volume":
-      return "Volume";
-    case "workspace":
-      return "Workspace";
-    case "database":
-      return "Database";
-    default:
-      return "Scoped";
-  }
+function formatScopeKind(scopeKind: "control-plane" | "workspace"): string {
+  return scopeKind === "control-plane" ? "Control plane" : "Workspace";
 }
 
 function formatTimestamp(value?: string) {
@@ -125,38 +114,64 @@ function expiryLabel(value?: string) {
   return `${days}d left`;
 }
 
+function keyMatchesFilter(key: APIKey, filter: APIKeyFilterChip): boolean {
+  switch (filter) {
+    case "all":
+      return true;
+    case "workspace":
+      return !isControlPlaneScope(key.scope);
+    case "control-plane":
+      return isControlPlaneScope(key.scope);
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /*  Detail dialog                                                     */
 /* ------------------------------------------------------------------ */
 
-function AccessTokenDetailDialog({
-  token,
+function APIKeyDetailDialog({
+  apiKey,
   workspaceNameById,
   databaseNameById,
   revoking,
   onClose,
   onRevoke,
 }: {
-  token: AFSMCPToken;
+  apiKey: APIKey;
   workspaceNameById?: Map<string, string>;
   databaseNameById?: Map<string, string>;
   revoking?: boolean;
   onClose: () => void;
-  onRevoke: (token: AFSMCPToken) => void;
+  onRevoke: (key: APIKey) => void;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
-  const scopeKind = tokenScopeKind(token);
+  const [snippetTab, setSnippetTab] = useState<"mcp" | "cli" | "sdk">("mcp");
+  const scopeKind = keyScopeKind(apiKey);
+  const workspaceId = apiKey.workspaceId ?? "";
   const workspaceName =
-    token.workspaceName || workspaceNameById?.get(token.workspaceId) || token.workspaceId;
-  const configSnippet = buildHostedAccessConfig(workspaceName);
+    apiKey.workspaceName || workspaceNameById?.get(workspaceId) || workspaceId;
+  const databaseId = apiKey.databaseId ?? "";
+  const databaseName = databaseNameById?.get(databaseId) || databaseId;
+  const profile = apiKey.kind === "mcp" ? apiKey.profile : undefined;
+  const titleLabel = apiKey.name?.trim() || "API key";
 
-  function copy() {
-    void navigator.clipboard.writeText(configSnippet).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+  function copy(text: string, label: string) {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(label);
+      window.setTimeout(() => setCopied(null), 2000);
     });
   }
+
+  const mcpSnippet = buildMCPSnippet({
+    workspaceName,
+    controlPlane: scopeKind === "control-plane",
+  });
+  const cliLogin = buildCLILoginSnippet(workspaceName);
+  const sdkSnippet = buildSDKSnippet({
+    workspaceName,
+    controlPlane: scopeKind === "control-plane",
+  });
 
   return (
     <>
@@ -168,9 +183,13 @@ function AccessTokenDetailDialog({
         <DialogCard>
           <DialogHeader>
             <div>
-              <DialogTitle>{token.name?.trim() || "Access token"}</DialogTitle>
+              <DialogTitle>{titleLabel}</DialogTitle>
               <DialogBody>
-                Access token for <strong>{workspaceName}</strong>.
+                {scopeKind === "control-plane" ? (
+                  <>Account-wide admin API key.</>
+                ) : (
+                  <>API key for <strong>{workspaceName}</strong>.</>
+                )}
               </DialogBody>
             </div>
             <DialogCloseButton onClick={onClose}>&times;</DialogCloseButton>
@@ -178,9 +197,15 @@ function AccessTokenDetailDialog({
 
           <DetailGrid>
             <DetailField>
-              <DetailLabel>Token ID</DetailLabel>
-              <DetailValue style={{ fontFamily: "var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace)", fontSize: 12 }}>
-                {token.id}
+              <DetailLabel>Key ID</DetailLabel>
+              <DetailValue
+                style={{
+                  fontFamily:
+                    "var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace)",
+                  fontSize: 12,
+                }}
+              >
+                {apiKey.id}
               </DetailValue>
             </DetailField>
             <DetailField>
@@ -189,49 +214,130 @@ function AccessTokenDetailDialog({
             </DetailField>
             <DetailField>
               <DetailLabel>Capability</DetailLabel>
-              <DetailValue>{formatCapability(token.capability, token.profile)}</DetailValue>
-            </DetailField>
-            <DetailField>
-              <DetailLabel>Target</DetailLabel>
-              <DetailValue>{workspaceName}</DetailValue>
-            </DetailField>
-            <DetailField>
-              <DetailLabel>Database</DetailLabel>
               <DetailValue>
-                {databaseNameById?.get(token.databaseId) || token.databaseId}
+                {summarizeCapability(apiKey, profile)}
               </DetailValue>
             </DetailField>
+            {scopeKind !== "control-plane" ? (
+              <>
+                <DetailField>
+                  <DetailLabel>Target</DetailLabel>
+                  <DetailValue>{workspaceName}</DetailValue>
+                </DetailField>
+                <DetailField>
+                  <DetailLabel>Database</DetailLabel>
+                  <DetailValue>{databaseName || "—"}</DetailValue>
+                </DetailField>
+              </>
+            ) : null}
+            {apiKey.kind === "mcp" &&
+            apiKey.mountCapabilities &&
+            apiKey.mountCapabilities.length > 0 ? (
+              <DetailField style={{ gridColumn: "1 / -1" }}>
+                <DetailLabel>Per-volume access</DetailLabel>
+                <MountAccessTable>
+                  <tbody>
+                    {apiKey.mountCapabilities.map((mc) => (
+                      <MountAccessRow key={mc.volumeId}>
+                        <MountAccessVolume>{mc.volumeId}</MountAccessVolume>
+                        <MountAccessCap>
+                          {formatCapability(mc.capability, undefined)}
+                        </MountAccessCap>
+                      </MountAccessRow>
+                    ))}
+                  </tbody>
+                </MountAccessTable>
+              </DetailField>
+            ) : null}
             <DetailField>
               <DetailLabel>Created</DetailLabel>
-              <DetailValue>{formatTimestamp(token.createdAt)}</DetailValue>
+              <DetailValue>{formatTimestamp(apiKey.createdAt)}</DetailValue>
             </DetailField>
             <DetailField>
               <DetailLabel>Last used</DetailLabel>
-              <DetailValue>{token.lastUsedAt ? formatTimestamp(token.lastUsedAt) : "Never"}</DetailValue>
+              <DetailValue>
+                {apiKey.lastUsedAt ? formatTimestamp(apiKey.lastUsedAt) : "Never"}
+              </DetailValue>
             </DetailField>
             <DetailField>
               <DetailLabel>Expires</DetailLabel>
-              <DetailValue>{token.expiresAt ? formatTimestamp(token.expiresAt) : "Never"}</DetailValue>
-            </DetailField>
-            <DetailField>
-              <DetailLabel>Profile</DetailLabel>
-              <DetailValue>{formatProfile(token.profile)}</DetailValue>
+              <DetailValue>
+                {apiKey.expiresAt ? formatTimestamp(apiKey.expiresAt) : "Never"}
+              </DetailValue>
             </DetailField>
           </DetailGrid>
 
-          <ConfigBlock>
-            <DetailLabel>MCP client config</DetailLabel>
-            <ConfigHint>
-              Paste this into your client's MCP config (e.g. <code>claude_desktop_config.json</code>),
-              and replace <code>{"<YOUR_TOKEN>"}</code> with the bearer token you copied at creation.
-            </ConfigHint>
-            <CodeBlock>{configSnippet}</CodeBlock>
-            <ConfigActions>
-              <Button size="small" variant="secondary-fill" onClick={copy}>
-                {copied ? "Copied!" : "Copy config"}
+          <SnippetBlock>
+            <SnippetHeader>
+              <DetailLabel>How to use this key</DetailLabel>
+              <SnippetTabs>
+                <SnippetTab
+                  type="button"
+                  $active={snippetTab === "mcp"}
+                  onClick={() => setSnippetTab("mcp")}
+                >
+                  MCP client
+                </SnippetTab>
+                <SnippetTab
+                  type="button"
+                  $active={snippetTab === "cli"}
+                  onClick={() => setSnippetTab("cli")}
+                >
+                  CLI
+                </SnippetTab>
+                <SnippetTab
+                  type="button"
+                  $active={snippetTab === "sdk"}
+                  onClick={() => setSnippetTab("sdk")}
+                >
+                  SDK
+                </SnippetTab>
+              </SnippetTabs>
+            </SnippetHeader>
+
+            <SnippetHint>
+              {snippetTab === "mcp" ? (
+                <>
+                  Paste into your client's MCP config (e.g.{" "}
+                  <code>claude_desktop_config.json</code>) and replace{" "}
+                  <code>{"<YOUR_KEY>"}</code> with the value copied at creation.
+                </>
+              ) : snippetTab === "cli" ? (
+                <>Sign the AFS CLI in with this key, then mount workspaces.</>
+              ) : (
+                <>
+                  Use this key as the bearer token from any SDK that talks to
+                  the AFS control plane.
+                </>
+              )}
+            </SnippetHint>
+
+            <CodeBlock>
+              {snippetTab === "mcp"
+                ? mcpSnippet
+                : snippetTab === "cli"
+                  ? cliLogin
+                  : sdkSnippet}
+            </CodeBlock>
+            <SnippetActions>
+              <Button
+                size="small"
+                variant="secondary-fill"
+                onClick={() =>
+                  copy(
+                    snippetTab === "mcp"
+                      ? mcpSnippet
+                      : snippetTab === "cli"
+                        ? cliLogin
+                        : sdkSnippet,
+                    snippetTab,
+                  )
+                }
+              >
+                {copied === snippetTab ? "Copied!" : "Copy snippet"}
               </Button>
-            </ConfigActions>
-          </ConfigBlock>
+            </SnippetActions>
+          </SnippetBlock>
 
           <DialogFooterRow>
             <RemoveButton
@@ -240,9 +346,14 @@ function AccessTokenDetailDialog({
               disabled={revoking}
               onClick={() => setConfirmingRevoke(true)}
             >
-              Revoke access token
+              Revoke API key
             </RemoveButton>
-            <Button size="medium" type="button" variant="secondary-fill" onClick={onClose}>
+            <Button
+              size="medium"
+              type="button"
+              variant="secondary-fill"
+              onClick={onClose}
+            >
               Close
             </Button>
           </DialogFooterRow>
@@ -260,10 +371,15 @@ function AccessTokenDetailDialog({
           <ConfirmCard role="alertdialog" aria-live="polite">
             <DialogHeader>
               <div>
-                <DialogTitle>Revoke this access token?</DialogTitle>
+                <DialogTitle>Revoke this API key?</DialogTitle>
                 <DialogBody>
-                  Any agent using this token will immediately lose access to{" "}
-                  <strong>{workspaceName}</strong>. This can&rsquo;t be undone.
+                  Any agent or CLI using this key will immediately lose access
+                  {scopeKind === "control-plane" ? null : (
+                    <>
+                      {" to "}<strong>{workspaceName}</strong>
+                    </>
+                  )}
+                  . This can&rsquo;t be undone.
                 </DialogBody>
               </div>
               <DialogCloseButton
@@ -288,7 +404,7 @@ function AccessTokenDetailDialog({
                 size="medium"
                 type="button"
                 disabled={revoking}
-                onClick={() => onRevoke(token)}
+                onClick={() => onRevoke(apiKey)}
               >
                 {revoking ? "Revoking..." : "Yes, revoke"}
               </RemoveButton>
@@ -300,14 +416,23 @@ function AccessTokenDetailDialog({
   );
 }
 
-function buildHostedAccessConfig(workspaceName: string) {
+function buildMCPSnippet({
+  workspaceName,
+  controlPlane,
+}: {
+  workspaceName: string;
+  controlPlane: boolean;
+}) {
+  const serverName = controlPlane
+    ? "agent-filesystem"
+    : `afs-${(workspaceName || "volume").trim()}`;
   return JSON.stringify(
     {
       mcpServers: {
-        [`afs-${workspaceName}`]: {
+        [serverName]: {
           url: `${getControlPlaneURL().replace(/\/+$/, "")}/mcp`,
           headers: {
-            Authorization: "Bearer <YOUR_TOKEN>",
+            Authorization: "Bearer <YOUR_KEY>",
           },
         },
       },
@@ -317,51 +442,83 @@ function buildHostedAccessConfig(workspaceName: string) {
   );
 }
 
+function buildCLILoginSnippet(workspaceName: string) {
+  const cp = getControlPlaneURL();
+  return [
+    `afs auth login --url ${shellQuote(cp)} --access-token <YOUR_KEY>`,
+    `afs ws mount ${shellQuote(workspaceName || "<workspace>")} <directory>`,
+  ].join("\n");
+}
+
+function buildSDKSnippet({
+  workspaceName,
+  controlPlane,
+}: {
+  workspaceName: string;
+  controlPlane: boolean;
+}) {
+  const target = controlPlane ? "control plane" : workspaceName || "<workspace>";
+  return [
+    `// TypeScript / Python SDK`,
+    `// Pass the key as a bearer token to the control plane (${target}).`,
+    `const afs = new AFS({`,
+    `  baseURL: ${JSON.stringify(getControlPlaneURL())},`,
+    `  apiKey: "<YOUR_KEY>",`,
+    `});`,
+  ].join("\n");
+}
+
+function shellQuote(value: string) {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main component                                                    */
 /* ------------------------------------------------------------------ */
 
-export function AccessTokensTable({
+export function APIKeysTable({
   rows,
   loading = false,
   error = false,
-  errorMessage = "Unable to load access tokens. Please retry.",
+  errorMessage = "Unable to load API keys. Please retry.",
   workspaceNameById,
   databaseNameById,
   toolbarAction,
   onRevoke,
   revoking = false,
+  initialFilter = "all",
 }: Props) {
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<AccessTokenSortField>("createdAt");
+  const [filter, setFilter] = useState<APIKeyFilterChip>(initialFilter);
+  const [sortBy, setSortBy] = useState<APIKeySortField>("createdAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  const [selectedToken, setSelectedToken] = useState<AFSMCPToken | null>(null);
+  const [selectedKey, setSelectedKey] = useState<APIKey | null>(null);
   const navigate = useNavigate();
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
-    const baseRows =
-      query === ""
-        ? rows
-        : rows.filter((row) =>
-            [
-              row.name ?? "",
-              row.id,
-              row.workspaceName ?? "",
-              row.workspaceId,
-              row.databaseId,
-              row.profile,
-              row.capability ?? "",
-              row.scope ?? "",
-            ].some((value) => value.toLowerCase().includes(query)),
-          );
+    const baseRows = rows
+      .filter((row) => keyMatchesFilter(row, filter))
+      .filter((row) => {
+        if (query === "") return true;
+        return [
+          row.name ?? "",
+          row.id,
+          row.workspaceName ?? "",
+          row.workspaceId ?? "",
+          row.databaseId ?? "",
+          row.scope ?? "",
+          row.capability ?? "",
+          row.kind === "mcp" ? row.profile : "",
+        ].some((value) => value.toLowerCase().includes(query));
+      });
 
     return [...baseRows].sort((left, right) => {
       const leftValue = sortValue(left, sortBy, workspaceNameById);
       const rightValue = sortValue(right, sortBy, workspaceNameById);
       return compareValues(leftValue, rightValue, sortDirection);
     });
-  }, [rows, search, sortBy, sortDirection, workspaceNameById]);
+  }, [rows, search, sortBy, sortDirection, workspaceNameById, filter]);
 
   const sorting = useMemo<SortingState>(
     () => [{ id: sortBy, desc: sortDirection === "desc" }],
@@ -377,7 +534,9 @@ export function AccessTokensTable({
           size: 200,
           enableSorting: true,
           cell: ({ row }) => {
-            const templateSlug = row.original.templateSlug;
+            const original = row.original;
+            const templateSlug =
+              original.kind === "mcp" ? original.templateSlug : undefined;
             const template = templateSlug ? findTemplate(templateSlug) : undefined;
             const templateLabel = template?.title ?? templateSlug;
             return (
@@ -387,12 +546,16 @@ export function AccessTokensTable({
                 </NameIconBox>
                 <S.Stack>
                   <Typography.Body component="strong">
-                    {row.original.name?.trim() || "Unnamed"}
+                    {original.name?.trim() || "Unnamed"}
                   </Typography.Body>
-                  <Typography.Body color="secondary" component="span" style={{ fontSize: 11 }}>
-                    {row.original.id}
+                  <Typography.Body
+                    color="secondary"
+                    component="span"
+                    style={{ fontSize: 11 }}
+                  >
+                    {original.id}
                   </Typography.Body>
-                  {templateSlug ? (
+                  {templateSlug && original.workspaceId ? (
                     <TemplateChip
                       type="button"
                       title={`Open installed template: ${templateLabel}`}
@@ -400,9 +563,9 @@ export function AccessTokensTable({
                         event.stopPropagation();
                         void navigate({
                           to: "/templates/installed/$workspaceId",
-                          params: { workspaceId: row.original.workspaceId },
-                          search: row.original.databaseId
-                            ? { databaseId: row.original.databaseId }
+                          params: { workspaceId: original.workspaceId ?? "" },
+                          search: original.databaseId
+                            ? { databaseId: original.databaseId }
                             : {},
                         });
                       }}
@@ -418,22 +581,27 @@ export function AccessTokensTable({
         {
           accessorKey: "scope",
           header: "Scope",
-          size: 260,
+          size: 280,
           enableSorting: true,
           cell: ({ row }) => {
-            if (isControlPlaneScope(row.original.scope)) {
+            const key = row.original;
+            if (isControlPlaneScope(key.scope)) {
               return <ScopeBadge $tone="control">Control plane</ScopeBadge>;
             }
-            const scopeKind = tokenScopeKind(row.original);
             const name =
-              row.original.workspaceName
-              || workspaceNameById?.get(row.original.workspaceId)
-              || row.original.workspaceId;
-            const db = databaseNameById?.get(row.original.databaseId) || row.original.databaseId;
+              key.workspaceName ||
+              workspaceNameById?.get(key.workspaceId ?? "") ||
+              key.workspaceId ||
+              "—";
+            const db =
+              databaseNameById?.get(key.databaseId ?? "") || key.databaseId;
             return (
               <ScopeCell>
-                <ScopeBadge $tone="workspace" title={db ? `Database: ${db}` : undefined}>
-                  {formatScopeKind(scopeKind)}: {name}
+                <ScopeBadge
+                  $tone="workspace"
+                  title={db ? `Database: ${db}` : undefined}
+                >
+                  Workspace: {name}
                 </ScopeBadge>
               </ScopeCell>
             );
@@ -442,13 +610,17 @@ export function AccessTokensTable({
         {
           accessorKey: "capability",
           header: "Capability",
-          size: 150,
+          size: 180,
           enableSorting: false,
-          cell: ({ row }) => (
-            <Typography.Body component="span">
-              {formatCapability(row.original.capability, row.original.profile)}
-            </Typography.Body>
-          ),
+          cell: ({ row }) => {
+            const key = row.original;
+            const profile = key.kind === "mcp" ? key.profile : undefined;
+            return (
+              <Typography.Body component="span">
+                {summarizeCapability(key, profile)}
+              </Typography.Body>
+            );
+          },
         },
         {
           accessorKey: "lastUsedAt",
@@ -471,9 +643,15 @@ export function AccessTokensTable({
           enableSorting: true,
           cell: ({ row }) => (
             <S.Stack>
-              <Typography.Body component="span">{expiryLabel(row.original.expiresAt)}</Typography.Body>
+              <Typography.Body component="span">
+                {expiryLabel(row.original.expiresAt)}
+              </Typography.Body>
               {row.original.expiresAt ? (
-                <Typography.Body color="secondary" component="span" style={{ fontSize: 11 }}>
+                <Typography.Body
+                  color="secondary"
+                  component="span"
+                  style={{ fontSize: 11 }}
+                >
                   {new Date(row.original.expiresAt).toLocaleDateString()}
                 </Typography.Body>
               ) : null}
@@ -491,71 +669,83 @@ export function AccessTokensTable({
             </Typography.Body>
           ),
         },
-      ] as ColumnDef<AFSMCPToken>[],
-    [databaseNameById, workspaceNameById],
+      ] as ColumnDef<APIKey>[],
+    [databaseNameById, workspaceNameById, navigate],
   );
 
-  const isFiltering = search.trim() !== "";
+  const isFiltering = search.trim() !== "" || filter !== "all";
 
   return (
     <>
       <S.TableBlock>
-      <S.HeadingWrap style={{ padding: 0 }}>
-        <S.SearchInput
-          value={search}
-          onChange={setSearch}
-          placeholder="Search access tokens..."
-        />
-        {toolbarAction}
-      </S.HeadingWrap>
-
-      {loading ? <S.EmptyState>Loading access tokens...</S.EmptyState> : null}
-      {error ? <S.EmptyState role="alert">{errorMessage}</S.EmptyState> : null}
-      {!loading && !error && filteredRows.length === 0 ? (
-        <S.EmptyState>
-          {isFiltering
-            ? "No access tokens match the current filter."
-            : "No access tokens yet. Click \u201CCreate access token\u201D to issue one."}
-        </S.EmptyState>
-      ) : null}
-
-      {!loading && !error && filteredRows.length > 0 ? (
-        <S.TableCard>
-          <S.DenseTableViewport>
-            <Table
-              columns={columns}
-              data={filteredRows}
-              sorting={sorting}
-              manualSorting
-              onSortingChange={(nextState) => {
-                if (nextState.length === 0) {
-                  setSortBy("createdAt");
-                  setSortDirection("desc");
-                  return;
-                }
-                const next = nextState[0];
-                setSortBy(next.id as AccessTokenSortField);
-                setSortDirection(next.desc ? "desc" : "asc");
-              }}
-              enableSorting
-              stripedRows
-              onRowClick={(rowData) => setSelectedToken(rowData)}
+        <S.HeadingWrap style={{ padding: 0 }}>
+          <S.SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search API keys..."
+          />
+          <FilterSelectWrap>
+            <Select
+              aria-label="Filter API keys"
+              options={[
+                { value: "all", label: "All keys" },
+                { value: "workspace", label: "Workspace" },
+                { value: "control-plane", label: "Control plane" },
+              ]}
+              value={filter}
+              onChange={(next) => setFilter(next as APIKeyFilterChip)}
             />
-          </S.DenseTableViewport>
-        </S.TableCard>
-      ) : null}
+          </FilterSelectWrap>
+          {toolbarAction}
+        </S.HeadingWrap>
+
+        {loading ? <S.EmptyState>Loading API keys...</S.EmptyState> : null}
+        {error ? <S.EmptyState role="alert">{errorMessage}</S.EmptyState> : null}
+        {!loading && !error && filteredRows.length === 0 ? (
+          <S.EmptyState>
+            {isFiltering
+              ? "No API keys match the current filter."
+              : 'No API keys yet. Click "Create API key" to issue one.'}
+          </S.EmptyState>
+        ) : null}
+
+        {!loading && !error && filteredRows.length > 0 ? (
+          <S.TableCard>
+            <S.DenseTableViewport>
+              <Table
+                columns={columns}
+                data={filteredRows}
+                sorting={sorting}
+                manualSorting
+                onSortingChange={(nextState) => {
+                  if (nextState.length === 0) {
+                    setSortBy("createdAt");
+                    setSortDirection("desc");
+                    return;
+                  }
+                  const next = nextState[0];
+                  setSortBy(next.id as APIKeySortField);
+                  setSortDirection(next.desc ? "desc" : "asc");
+                }}
+                enableSorting
+                stripedRows
+                onRowClick={(rowData) => setSelectedKey(rowData)}
+              />
+            </S.DenseTableViewport>
+          </S.TableCard>
+        ) : null}
       </S.TableBlock>
 
-      {selectedToken != null ? (
-        <AccessTokenDetailDialog
-          token={selectedToken}
+      {selectedKey != null ? (
+        <APIKeyDetailDialog
+          apiKey={selectedKey}
           workspaceNameById={workspaceNameById}
           databaseNameById={databaseNameById}
           revoking={revoking}
-          onClose={() => setSelectedToken(null)}
-          onRevoke={(token) => {
-            onRevoke(token);
-            setSelectedToken(null);
+          onClose={() => setSelectedKey(null)}
+          onRevoke={(key) => {
+            onRevoke(key);
+            setSelectedKey(null);
           }}
         />
       ) : null}
@@ -563,29 +753,54 @@ export function AccessTokensTable({
   );
 }
 
+/**
+ * @deprecated Use APIKeysTable. Kept as a thin alias while consumers migrate.
+ */
+export const AccessTokensTable = APIKeysTable;
+
 function sortValue(
-  token: AFSMCPToken,
-  field: AccessTokenSortField,
+  key: APIKey,
+  field: APIKeySortField,
   workspaceNameById?: Map<string, string>,
 ): string | number {
   switch (field) {
     case "name":
-      return token.name?.trim() || token.id;
-    case "workspaceName":
-      return token.workspaceName || workspaceNameById?.get(token.workspaceId) || token.workspaceId;
+      return key.name?.trim() || key.id;
+    case "scope":
+      return (
+        key.workspaceName ||
+        workspaceNameById?.get(key.workspaceId ?? "") ||
+        key.workspaceId ||
+        key.scope ||
+        ""
+      );
     case "lastUsedAt":
-      return token.lastUsedAt ? new Date(token.lastUsedAt).getTime() : 0;
+      return key.lastUsedAt ? new Date(key.lastUsedAt).getTime() : 0;
     case "expiresAt":
-      return token.expiresAt ? new Date(token.expiresAt).getTime() : Number.MAX_SAFE_INTEGER;
+      return key.expiresAt
+        ? new Date(key.expiresAt).getTime()
+        : Number.MAX_SAFE_INTEGER;
     case "createdAt":
     default:
-      return new Date(token.createdAt).getTime();
+      return new Date(key.createdAt).getTime();
   }
 }
 
 /* ------------------------------------------------------------------ */
 /*  Styled                                                            */
 /* ------------------------------------------------------------------ */
+
+const FilterSelectWrap = styled.div`
+  min-width: 168px;
+  flex-shrink: 0;
+
+  /* The Redis Select renders inline-block by default; let it stretch to
+     fill the wrapper so the dropdown sits neatly between search and the
+     toolbar actions. */
+  > * {
+    width: 100%;
+  }
+`;
 
 const DetailGrid = styled.div`
   display: grid;
@@ -616,6 +831,34 @@ const DetailValue = styled.span`
   color: var(--afs-ink, #18181b);
   font-size: 14px;
   word-break: break-all;
+`;
+
+const MountAccessTable = styled.table`
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+`;
+
+const MountAccessRow = styled.tr`
+  & + & {
+    border-top: 1px dashed var(--afs-line);
+  }
+`;
+
+const MountAccessVolume = styled.td`
+  padding: 8px 12px 8px 0;
+  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  color: var(--afs-ink);
+  vertical-align: top;
+`;
+
+const MountAccessCap = styled.td`
+  padding: 8px 0;
+  font-size: 13px;
+  color: var(--afs-ink);
+  text-align: right;
+  vertical-align: top;
 `;
 
 const NameCell = styled.div`
@@ -651,14 +894,13 @@ const ScopeBadge = styled.span<{ $tone: "control" | "workspace" }>`
   border: 1px solid
     ${({ $tone }) =>
       $tone === "control"
-        ? "color-mix(in srgb, var(--afs-accent, #2563eb) 45%, var(--afs-line))"
+        ? "color-mix(in srgb, #d97706 55%, var(--afs-line))"
         : "color-mix(in srgb, #10b981 45%, var(--afs-line))"};
   background: ${({ $tone }) =>
     $tone === "control"
-      ? "color-mix(in srgb, var(--afs-accent, #2563eb) 14%, transparent)"
+      ? "color-mix(in srgb, #d97706 16%, transparent)"
       : "color-mix(in srgb, #10b981 14%, transparent)"};
-  color: ${({ $tone }) =>
-    $tone === "control" ? "var(--afs-accent, #2563eb)" : "#047857"};
+  color: ${({ $tone }) => ($tone === "control" ? "#b45309" : "#047857")};
 `;
 
 const ScopeCell = styled.div`
@@ -673,7 +915,8 @@ const TemplateChip = styled.button`
   margin-top: 3px;
   padding: 2px 8px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--afs-accent, #2563eb) 30%, var(--afs-line));
+  border: 1px solid
+    color-mix(in srgb, var(--afs-accent, #2563eb) 30%, var(--afs-line));
   background: color-mix(in srgb, var(--afs-accent, #2563eb) 10%, transparent);
   color: var(--afs-accent, #2563eb);
   font-size: 10.5px;
@@ -682,17 +925,54 @@ const TemplateChip = styled.button`
   cursor: pointer;
 
   &:hover {
-    background: color-mix(in srgb, var(--afs-accent, #2563eb) 18%, transparent);
+    background: color-mix(
+      in srgb,
+      var(--afs-accent, #2563eb) 18%,
+      transparent
+    );
   }
 `;
 
-const ConfigBlock = styled.div`
+const SnippetBlock = styled.div`
   display: grid;
   gap: 8px;
   margin-top: 20px;
 `;
 
-const ConfigHint = styled.p`
+const SnippetHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+`;
+
+const SnippetTabs = styled.div`
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--afs-panel);
+  border: 1px solid var(--afs-line);
+`;
+
+const SnippetTab = styled.button<{ $active: boolean }>`
+  appearance: none;
+  border: none;
+  background: ${({ $active }) =>
+    $active ? "var(--afs-accent, #2563eb)" : "transparent"};
+  color: ${({ $active }) => ($active ? "#fff" : "var(--afs-ink-soft)")};
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+`;
+
+const SnippetHint = styled.p`
   margin: 0;
   color: var(--afs-muted);
   font-size: 12px;
@@ -722,7 +1002,7 @@ const CodeBlock = styled.pre`
   max-height: 240px;
 `;
 
-const ConfigActions = styled.div`
+const SnippetActions = styled.div`
   display: flex;
   justify-content: flex-end;
 `;

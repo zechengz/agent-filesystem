@@ -57,7 +57,9 @@ type catalogStore interface {
 
 	CreateCLIAccessToken(ctx context.Context, item cliAccessTokenRecord) error
 	GetCLIAccessToken(ctx context.Context, tokenID string) (cliAccessTokenRecord, error)
+	ListAllCLIAccessTokens(ctx context.Context) ([]cliAccessTokenRecord, error)
 	TouchCLIAccessToken(ctx context.Context, tokenID, lastUsedAt string) error
+	RevokeCLIAccessTokenByID(ctx context.Context, tokenID, revokedAt string) error
 	RevokeCLIAccessTokensByOwner(ctx context.Context, ownerSubject, revokedAt string) error
 
 	CreateMCPAccessToken(ctx context.Context, item mcpAccessTokenRecord) error

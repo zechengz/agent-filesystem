@@ -6,11 +6,17 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { afsApi, getAFSClientMode, monitorStreamURL } from "../api/afs";
 import type { ListActivityInput, ListChangelogInput, ListEventsInput } from "../api/afs";
+import {
+  asCLIAPIKey,
+  asMCPAPIKey,
+  isControlPlaneScope,
+} from "../types/afs";
 import type {
   AFSAgentSession,
+  APIKey,
   CreateSavepointInput,
   CreateWorkspaceInput,
   DiffFileVersionsInput,
@@ -37,6 +43,7 @@ import type {
   CreateMCPTokenInput,
   CreateCLIAccessTokenInput,
   CreateControlPlaneTokenInput,
+  CreateWorkspaceAPIKeyInput,
   CreateWorkspaceCompositionInput,
   UpdateWorkspaceCompositionInput,
   ReplaceWorkspaceCompositionMountsInput,
@@ -220,6 +227,7 @@ export const afsKeys = {
     [...afsKeys.all, "databases", databaseId ?? "all", "workspaces", workspaceId, "mcp-tokens"] as const,
   allMcpTokens: () => [...afsKeys.all, "mcp-tokens", "all"] as const,
   controlPlaneTokens: () => [...afsKeys.all, "mcp-tokens", "control-plane"] as const,
+  allCliTokens: () => [...afsKeys.all, "cli-tokens", "all"] as const,
 };
 
 export function databasesQueryOptions() {
@@ -482,6 +490,15 @@ export function controlPlaneTokensQueryOptions() {
   });
 }
 
+export function allCLIAccessTokensQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.allCliTokens(),
+    queryFn: () => afsApi.listAllCLIAccessTokens(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
 export function useDatabases(enabled = true) {
   return useQuery({
     ...databasesQueryOptions(),
@@ -582,6 +599,70 @@ export function useControlPlaneTokens(enabled = true) {
     ...controlPlaneTokensQueryOptions(),
     enabled,
   });
+}
+
+export function useAllCLIAccessTokens(enabled = true) {
+  return useQuery({
+    ...allCLIAccessTokensQueryOptions(),
+    enabled,
+  });
+}
+
+/**
+ * Merged view of every API key (MCP, control-plane, CLI mount) for the
+ * unified `/api-keys` page. Filters out revoked rows and de-duplicates MCP
+ * + control-plane responses (the same token can show up in both queries).
+ */
+export function useAllAPIKeys(enabled = true): {
+  data: APIKey[];
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+} {
+  const mcp = useAllMCPAccessTokens(enabled);
+  const controlPlane = useControlPlaneTokens(enabled);
+  const cli = useAllCLIAccessTokens(enabled);
+
+  const data = useMemo<APIKey[]>(() => {
+    const seenMCP = new Set<string>();
+    const rows: APIKey[] = [];
+
+    for (const token of mcp.data ?? []) {
+      if (token.revokedAt && token.revokedAt !== "") continue;
+      if (isControlPlaneScope(token.scope)) continue;
+      seenMCP.add(token.id);
+      rows.push(asMCPAPIKey(token));
+    }
+    for (const token of controlPlane.data ?? []) {
+      if (token.revokedAt && token.revokedAt !== "") continue;
+      if (seenMCP.has(token.id)) continue;
+      rows.push(asMCPAPIKey(token));
+    }
+    for (const token of cli.data ?? []) {
+      if (token.revokedAt && token.revokedAt !== "") continue;
+      rows.push(asCLIAPIKey(token));
+    }
+    return rows.sort(
+      (left, right) =>
+        new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+    );
+  }, [mcp.data, controlPlane.data, cli.data]);
+
+  const firstError =
+    mcp.error instanceof Error
+      ? mcp.error
+      : controlPlane.error instanceof Error
+        ? controlPlane.error
+        : cli.error instanceof Error
+          ? cli.error
+          : null;
+
+  return {
+    data,
+    isLoading: mcp.isLoading || controlPlane.isLoading || cli.isLoading,
+    isError: mcp.isError || controlPlane.isError || cli.isError,
+    error: firstError,
+  };
 }
 
 export function useAgents(databaseId: string | null, enabled = true) {
@@ -1003,6 +1084,28 @@ export function useCreateCLIAccessTokenMutation() {
       void queryClient.invalidateQueries({
         queryKey: afsKeys.workspaceComposition(variables.workspaceId),
       });
+      void queryClient.invalidateQueries({ queryKey: afsKeys.allCliTokens() });
+    },
+  });
+}
+
+export function useRevokeCLIAccessTokenMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (tokenId: string) => afsApi.revokeCLIAccessToken(tokenId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: afsKeys.allCliTokens() });
+    },
+  });
+}
+
+export function useCreateWorkspaceCompositionAPIKeyMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateWorkspaceAPIKeyInput) =>
+      afsApi.createWorkspaceCompositionAPIKey(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: afsKeys.allMcpTokens() });
     },
   });
 }

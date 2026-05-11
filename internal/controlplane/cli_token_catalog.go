@@ -88,10 +88,46 @@ func (c *workspaceCatalog) GetCLIAccessToken(ctx context.Context, tokenID string
 	return items[0], nil
 }
 
+func (c *workspaceCatalog) ListAllCLIAccessTokens(ctx context.Context) ([]cliAccessTokenRecord, error) {
+	rows, err := c.queryContext(ctx, c.rebind(`SELECT
+		id,
+		name,
+		owner_subject,
+		owner_label,
+		database_id,
+		workspace_id,
+		workspace_name,
+		scope,
+		capability,
+		secret_hash,
+		created_at,
+		last_used_at,
+		expires_at,
+		revoked_at
+	FROM cli_access_tokens
+	WHERE revoked_at = ''
+	ORDER BY created_at DESC`))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanCLIAccessTokenRows(rows)
+}
+
 func (c *workspaceCatalog) TouchCLIAccessToken(ctx context.Context, tokenID, lastUsedAt string) error {
 	_, err := c.execContext(ctx, c.rebind(`UPDATE cli_access_tokens
 		SET last_used_at = ?
 		WHERE id = ?`), strings.TrimSpace(lastUsedAt), strings.TrimSpace(tokenID))
+	return err
+}
+
+func (c *workspaceCatalog) RevokeCLIAccessTokenByID(ctx context.Context, tokenID, revokedAt string) error {
+	_, err := c.execContext(ctx, c.rebind(`UPDATE cli_access_tokens
+		SET revoked_at = ?
+		WHERE id = ? AND revoked_at = ''`),
+		strings.TrimSpace(revokedAt),
+		strings.TrimSpace(tokenID),
+	)
 	return err
 }
 

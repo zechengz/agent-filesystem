@@ -183,17 +183,28 @@ func NewHandlerWithOptions(manager *DatabaseManager, opts HandlerOptions) http.H
 				// Legacy tokens predating the scope column: infer.
 				scope = workspaceScope(record.WorkspaceID)
 			}
+			var mountCaps map[string]string
+			if len(record.MountCapabilities) > 0 {
+				mountCaps = make(map[string]string, len(record.MountCapabilities))
+				for _, mc := range record.MountCapabilities {
+					if id := strings.TrimSpace(mc.VolumeID); id != "" {
+						mountCaps[id] = strings.TrimSpace(mc.Capability)
+					}
+				}
+			}
 			return &AuthIdentity{
-				Subject:           strings.TrimSpace(record.OwnerSubject),
-				Name:              strings.TrimSpace(record.OwnerLabel),
-				Provider:          "mcp-token",
-				TokenID:           strings.TrimSpace(record.ID),
-				Scope:             scope,
-				ScopedDatabaseID:  strings.TrimSpace(record.DatabaseID),
-				ScopedWorkspaceID: strings.TrimSpace(record.WorkspaceID),
-				ScopedWorkspace:   strings.TrimSpace(record.WorkspaceName),
-				MCPProfile:        strings.TrimSpace(record.Profile),
-				Readonly:          record.Readonly,
+				Subject:                    strings.TrimSpace(record.OwnerSubject),
+				Name:                       strings.TrimSpace(record.OwnerLabel),
+				Provider:                   "mcp-token",
+				TokenID:                    strings.TrimSpace(record.ID),
+				Scope:                      scope,
+				Capability:                 strings.TrimSpace(record.Capability),
+				ScopedDatabaseID:           strings.TrimSpace(record.DatabaseID),
+				ScopedWorkspaceID:          strings.TrimSpace(record.WorkspaceID),
+				ScopedWorkspace:            strings.TrimSpace(record.WorkspaceName),
+				MCPProfile:                 strings.TrimSpace(record.Profile),
+				Readonly:                   record.Readonly,
+				WorkspaceMountCapabilities: mountCaps,
 			}, nil
 		})
 	}
@@ -627,6 +638,36 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	})
+
+	mux.HandleFunc("/v1/cli-tokens", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.ListAllCLIAccessTokens(r.Context())
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": response})
+	})
+
+	mux.HandleFunc("/v1/cli-tokens/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		tokenID := strings.TrimPrefix(r.URL.Path, "/v1/cli-tokens/")
+		if tokenID == "" || strings.Contains(tokenID, "/") {
+			writeError(w, fmt.Errorf("invalid token id"))
+			return
+		}
+		if err := manager.RevokeCLIAccessToken(r.Context(), tokenID); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	mux.HandleFunc("/v1/mcp-tokens", func(w http.ResponseWriter, r *http.Request) {
@@ -1360,6 +1401,25 @@ func handleResolvedWorkspaceCompositionRoute(
 		default:
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
 		}
+	case strings.HasSuffix(workspacePath, "/api-keys"):
+		workspace := strings.TrimSuffix(workspacePath, "/api-keys")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input createMCPAccessTokenRequest
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+		}
+		response, err := manager.CreateResolvedWorkspaceCompositionAPIKey(r.Context(), workspace, input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, response)
 	default:
 		workspace := workspacePath
 		switch r.Method {

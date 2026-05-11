@@ -20,7 +20,6 @@ import {
   useWorkspaceQueryIndexStatus,
 } from "../../foundation/hooks/use-afs";
 import type {
-  AFSMCPToken,
   AFSWorkspaceContentStorage,
   AFSWorkspaceDetail,
   AFSWorkspaceSearchIndex,
@@ -36,8 +35,6 @@ type Props = {
   saveError?: string | null;
   onDelete: () => void;
   isDeleting: boolean;
-  mcpTokens: AFSMCPToken[];
-  onOpenMCPConsole: () => void;
 };
 
 export function SettingsTab({
@@ -47,14 +44,7 @@ export function SettingsTab({
   saveError,
   onDelete,
   isDeleting,
-  mcpTokens,
-  onOpenMCPConsole,
 }: Props) {
-  const activeTokens = mcpTokens.filter(
-    (token) => token.revokedAt == null || token.revokedAt === "",
-  );
-  const activeToken = activeTokens.at(0);
-  const tokenCount = activeTokens.length;
   const versioningQuery = useWorkspaceVersioningPolicy({
     databaseId: workspace.databaseId,
     workspaceId: workspace.id,
@@ -477,101 +467,6 @@ export function SettingsTab({
         </FormGrid>
       </SectionCard>
 
-      <SectionCard $span={12}>
-        <SectionHeader>
-          <SectionTitle title="Agent access" />
-          <Button size="medium" onClick={onOpenMCPConsole}>
-            Open MCP console
-          </Button>
-        </SectionHeader>
-
-        <AccessCopy>
-          MCP setup now lives on the MCP page so you can manage all
-          volume-scoped access tokens and config snippets in one place. This
-          panel stays focused on the current volume and shows whether it
-          already has authorized MCP access.
-        </AccessCopy>
-
-        <MetaTable>
-          <tbody>
-            <MetaRow>
-              <MetaLabel>Authorized tokens</MetaLabel>
-              <MetaValue>
-                {tokenCount === 0
-                  ? "None yet"
-                  : `${tokenCount} active token${tokenCount === 1 ? "" : "s"}`}
-              </MetaValue>
-            </MetaRow>
-            <MetaRow>
-              <MetaLabel>Volume scope</MetaLabel>
-              <MetaValue>
-                All MCP tokens created from this volume stay locked to{" "}
-                {workspace.name}.
-              </MetaValue>
-            </MetaRow>
-            <MetaRow>
-              <MetaLabel>Admin tools</MetaLabel>
-              <MetaValue>
-                Volume settings no longer mint admin access tokens. Use the
-                access token console for explicit elevated flows.
-              </MetaValue>
-            </MetaRow>
-            {activeToken ? (
-              <>
-                <MetaRow>
-                  <MetaLabel>Latest token</MetaLabel>
-                  <MetaValue>
-                    {activeToken.name?.trim() || activeToken.id}
-                  </MetaValue>
-                </MetaRow>
-                <MetaRow>
-                  <MetaLabel>Last used</MetaLabel>
-                  <MetaValue>
-                    {activeToken.lastUsedAt
-                      ? formatTimestamp(activeToken.lastUsedAt)
-                      : "Never"}
-                  </MetaValue>
-                </MetaRow>
-              </>
-            ) : null}
-          </tbody>
-        </MetaTable>
-
-        {activeTokens.length > 0 ? (
-          <TokenTable>
-            <thead>
-              <tr>
-                <TokenHead>Name</TokenHead>
-                <TokenHead>Profile</TokenHead>
-                <TokenHead>Last used</TokenHead>
-                <TokenHead>Expires</TokenHead>
-              </tr>
-            </thead>
-            <tbody>
-              {activeTokens.map((token) => (
-                <TokenRow key={token.id}>
-                  <TokenCell>
-                    <TokenName>{token.name?.trim() || token.id}</TokenName>
-                    <TokenSubtle>{token.id}</TokenSubtle>
-                  </TokenCell>
-                  <TokenCell>{formatProfile(token.profile)}</TokenCell>
-                  <TokenCell>
-                    {token.lastUsedAt
-                      ? formatTimestamp(token.lastUsedAt)
-                      : "Never"}
-                  </TokenCell>
-                  <TokenCell>
-                    {token.expiresAt
-                      ? formatTimestamp(token.expiresAt)
-                      : "Never"}
-                  </TokenCell>
-                </TokenRow>
-              ))}
-            </tbody>
-          </TokenTable>
-        ) : null}
-      </SectionCard>
-
       <DangerZoneCard>
         <DangerZoneHeader>
           <DangerZoneTitle>Delete volume</DangerZoneTitle>
@@ -709,13 +604,6 @@ const StorageText = styled.div`
   color: var(--afs-muted);
   font-size: 13px;
   line-height: 1.55;
-`;
-
-const AccessCopy = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 14px;
-  line-height: 1.6;
 `;
 
 const VersioningCopy = styled.p`
@@ -873,32 +761,6 @@ const VersioningNotice = styled.div`
   font-weight: 600;
 `;
 
-const TokenTable = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 18px;
-`;
-
-const TokenHead = styled.th`
-  padding: 0 0 10px;
-  color: var(--afs-muted);
-  font-size: 12px;
-  font-weight: 700;
-  text-align: left;
-  border-bottom: 1px solid var(--afs-line);
-`;
-
-const TokenRow = styled.tr`
-  border-bottom: 1px solid var(--afs-line);
-`;
-
-const TokenCell = styled.td`
-  padding: 14px 0;
-  color: var(--afs-ink);
-  font-size: 13px;
-  vertical-align: top;
-`;
-
 function splitGlobList(raw: string) {
   return raw
     .split(/\r?\n|,/)
@@ -917,17 +779,6 @@ function parseWholeNumber(raw: string, label: string) {
   }
   return parsed;
 }
-
-const TokenName = styled.div`
-  font-weight: 700;
-`;
-
-const TokenSubtle = styled.div`
-  margin-top: 4px;
-  color: var(--afs-muted);
-  font-size: 12px;
-  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-`;
 
 const DangerZoneCard = styled(SurfaceCard)`
   grid-column: span 12;
@@ -992,23 +843,6 @@ const DeleteWorkspaceButton = styled(Button)`
     box-shadow: none;
   }
 `;
-
-function formatProfile(profile: AFSMCPToken["profile"]) {
-  switch (profile) {
-    case "workspace-ro":
-      return "Read only";
-    case "workspace-rw":
-      return "Read/write";
-    case "workspace-rw-checkpoint":
-      return "Read/write + checkpoints";
-    case "admin-ro":
-      return "Admin read only";
-    case "admin-rw":
-      return "Admin read/write";
-    default:
-      return profile;
-  }
-}
 
 const VERSIONING_MODE_OPTIONS = [
   { value: "off", label: "Off" },
@@ -1133,10 +967,3 @@ function formatPercent(value: number) {
   return `${Math.min(100, Math.round(value * 100))}%`;
 }
 
-function formatTimestamp(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString();
-}

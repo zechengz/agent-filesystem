@@ -192,7 +192,7 @@ func (c *httpControlPlaneClient) GetWorkspaceComposition(ctx context.Context, wo
 
 func (c *httpControlPlaneClient) AddWorkspaceCompositionMount(ctx context.Context, workspace string, mount controlplane.WorkspaceCompositionMount) (controlplane.WorkspaceCompositionDetail, error) {
 	var out controlplane.WorkspaceCompositionDetail
-	err := c.doJSON(ctx, http.MethodPost, c.workspaceCompositionPath(workspace, "mounts"), mount, &out, http.StatusOK)
+	err := c.doJSON(ctx, http.MethodPost, c.workspaceCompositionPath(workspace, "mounts"), mount, &out, http.StatusCreated, http.StatusOK)
 	return out, err
 }
 

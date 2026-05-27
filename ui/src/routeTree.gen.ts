@@ -44,6 +44,7 @@ import { Route as DocsHowItWorksRouteImport } from './routes/docs_.how-it-works'
 import { Route as DocsFaqRouteImport } from './routes/docs_.faq'
 import { Route as DocsCliRouteImport } from './routes/docs_.cli'
 import { Route as TemplatesInstalledWorkspaceIdRouteImport } from './routes/templates.installed.$workspaceId'
+import { Route as WorkspacesWorkspaceIdVolumesVolumeIdRouteImport } from './routes/workspaces_.$workspaceId.volumes.$volumeId'
 
 const WorkspacesRoute = WorkspacesRouteImport.update({
   id: '/workspaces',
@@ -221,6 +222,12 @@ const TemplatesInstalledWorkspaceIdRoute =
     path: '/installed/$workspaceId',
     getParentRoute: () => TemplatesRoute,
   } as any)
+const WorkspacesWorkspaceIdVolumesVolumeIdRoute =
+  WorkspacesWorkspaceIdVolumesVolumeIdRouteImport.update({
+    id: '/workspaces_/$workspaceId/volumes/$volumeId',
+    path: '/workspaces/$workspaceId/volumes/$volumeId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -258,6 +265,7 @@ export interface FileRoutesByFullPath {
   '/volumes/$volumeId': typeof VolumesVolumeIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/templates/installed/$workspaceId': typeof TemplatesInstalledWorkspaceIdRoute
+  '/workspaces/$workspaceId/volumes/$volumeId': typeof WorkspacesWorkspaceIdVolumesVolumeIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -295,6 +303,7 @@ export interface FileRoutesByTo {
   '/volumes/$volumeId': typeof VolumesVolumeIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/templates/installed/$workspaceId': typeof TemplatesInstalledWorkspaceIdRoute
+  '/workspaces/$workspaceId/volumes/$volumeId': typeof WorkspacesWorkspaceIdVolumesVolumeIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -333,6 +342,7 @@ export interface FileRoutesById {
   '/volumes/$volumeId': typeof VolumesVolumeIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/templates/installed/$workspaceId': typeof TemplatesInstalledWorkspaceIdRoute
+  '/workspaces_/$workspaceId/volumes/$volumeId': typeof WorkspacesWorkspaceIdVolumesVolumeIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -372,6 +382,7 @@ export interface FileRouteTypes {
     | '/volumes/$volumeId'
     | '/workspaces/$workspaceId'
     | '/templates/installed/$workspaceId'
+    | '/workspaces/$workspaceId/volumes/$volumeId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -409,6 +420,7 @@ export interface FileRouteTypes {
     | '/volumes/$volumeId'
     | '/workspaces/$workspaceId'
     | '/templates/installed/$workspaceId'
+    | '/workspaces/$workspaceId/volumes/$volumeId'
   id:
     | '__root__'
     | '/'
@@ -446,6 +458,7 @@ export interface FileRouteTypes {
     | '/volumes/$volumeId'
     | '/workspaces/$workspaceId'
     | '/templates/installed/$workspaceId'
+    | '/workspaces_/$workspaceId/volumes/$volumeId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -479,6 +492,7 @@ export interface RootRouteChildren {
   DocsTypescriptSdkRoute: typeof DocsTypescriptSdkRoute
   DocsWorkspacesRoute: typeof DocsWorkspacesRoute
   McpConnectRoute: typeof McpConnectRoute
+  WorkspacesWorkspaceIdVolumesVolumeIdRoute: typeof WorkspacesWorkspaceIdVolumesVolumeIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -728,6 +742,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TemplatesInstalledWorkspaceIdRouteImport
       parentRoute: typeof TemplatesRoute
     }
+    '/workspaces_/$workspaceId/volumes/$volumeId': {
+      id: '/workspaces_/$workspaceId/volumes/$volumeId'
+      path: '/workspaces/$workspaceId/volumes/$volumeId'
+      fullPath: '/workspaces/$workspaceId/volumes/$volumeId'
+      preLoaderRoute: typeof WorkspacesWorkspaceIdVolumesVolumeIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -818,6 +839,8 @@ const rootRouteChildren: RootRouteChildren = {
   DocsTypescriptSdkRoute: DocsTypescriptSdkRoute,
   DocsWorkspacesRoute: DocsWorkspacesRoute,
   McpConnectRoute: McpConnectRoute,
+  WorkspacesWorkspaceIdVolumesVolumeIdRoute:
+    WorkspacesWorkspaceIdVolumesVolumeIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

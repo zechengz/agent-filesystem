@@ -1,13 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/uistatic"
 )
 
 const (
@@ -44,20 +47,24 @@ func main() {
 		fmt.Fprintln(os.Stderr, "no embedded CLI bundle; /v1/cli will use normal resolver")
 	}
 
-	manager, err := controlplane.OpenDatabaseManager(configPath)
-	if err != nil {
-		fatal(err)
-	}
-	defer manager.Close()
-
 	auth, err := controlplane.LoadAuthHandlerFromEnv()
 	if err != nil {
 		fatal(err)
 	}
 
+	manager, err := controlplane.OpenDatabaseManager(configPath)
+	var handler http.Handler
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "warn: catalog unavailable; starting degraded handler:", err)
+		handler = newDegradedCatalogHandler(allowOrigin)
+	} else {
+		defer manager.Close()
+		handler = controlplane.NewHandlerWithOptions(manager, controlplane.HandlerOptions{AllowOrigin: allowOrigin, Auth: auth})
+	}
+
 	server := &http.Server{
 		Addr:              listenAddr,
-		Handler:           controlplane.NewHandlerWithOptions(manager, controlplane.HandlerOptions{AllowOrigin: allowOrigin, Auth: auth}),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -72,6 +79,71 @@ func defaultListenAddr() string {
 		return ":" + port
 	}
 	return "127.0.0.1:8091"
+}
+
+func newDegradedCatalogHandler(allowOrigin string) http.Handler {
+	uiFS, err := fs.Sub(uistatic.Content, "dist")
+	if err != nil {
+		return degradedCORS(http.HandlerFunc(writeCatalogUnavailable), allowOrigin)
+	}
+	if _, err := fs.Stat(uiFS, "index.html"); err != nil {
+		return degradedCORS(http.HandlerFunc(writeCatalogUnavailable), allowOrigin)
+	}
+
+	fileServer := http.FileServer(http.FS(uiFS))
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isControlPlanePath(r.URL.Path) {
+			writeCatalogUnavailable(w, r)
+			return
+		}
+
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path == "" {
+			path = "index.html"
+		}
+		if _, err := fs.Stat(uiFS, path); err == nil {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		clone := r.Clone(r.Context())
+		clone.URL.Path = "/"
+		fileServer.ServeHTTP(w, clone)
+	})
+	return degradedCORS(handler, allowOrigin)
+}
+
+func isControlPlanePath(path string) bool {
+	return strings.HasPrefix(path, "/v1/") ||
+		strings.HasPrefix(path, "/v2/") ||
+		path == "/healthz" ||
+		path == "/install.sh" ||
+		path == "/mcp"
+}
+
+func writeCatalogUnavailable(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":     false,
+		"error":  "catalog unavailable",
+		"detail": "AFS Cloud is temporarily unable to reach its catalog database.",
+	})
+}
+
+func degradedCORS(next http.Handler, allowOrigin string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if allowOrigin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func fatal(err error) {
